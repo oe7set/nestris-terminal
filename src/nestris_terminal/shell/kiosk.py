@@ -79,6 +79,10 @@ class KioskWindow(QMainWindow):
         self._placeholder.setText(text)
         self._stack.setCurrentWidget(self._placeholder)
 
+    def allow_close(self) -> None:
+        """Let the next close through (a deliberate quit)."""
+        self._allow_close = True
+
     def closeEvent(self, event: QCloseEvent) -> None:
         # Alt+F4 on a kiosk must not end the session; quitting goes through
         # the config menu (or --windowed during development).
@@ -105,9 +109,15 @@ def run_kiosk(settings: Settings, *, windowed: bool = False) -> int:
     core = CoreThread(runtime)
     window = KioskWindow(runtime.local_url, allow_close=windowed)
 
+    def quit_app() -> None:
+        # Qt 6: QApplication.quit() first closes every window and is cancelled
+        # when one ignores its close event, which the kiosk window does.
+        window.allow_close()
+        app.quit()
+
     def on_command(command: str) -> None:
         if command == "quit":
-            app.quit()
+            quit_app()
         else:  # a second start: bring the kiosk to the front
             window.raise_()
             window.activateWindow()
@@ -119,7 +129,7 @@ def run_kiosk(settings: Settings, *, windowed: bool = False) -> int:
     def check_core() -> None:
         if core.finished.is_set():
             if runtime.quit_requested or windowed:
-                app.quit()
+                quit_app()
             else:
                 window.show_message(f"Terminal-Kern beendet:\n{core.error or 'unbekannter Fehler'}")
         elif runtime.http_started and not window.property("loaded"):
