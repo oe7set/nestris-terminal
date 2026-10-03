@@ -1,8 +1,9 @@
 """Start with Windows: the per-user ``Run`` registry key.
 
-The entry starts the kiosk at sign-in. In a PyInstaller build
-the executable itself is registered; in development ``pythonw -m
-nestris_terminal`` is used so no console window appears.
+The entry starts the kiosk at sign-in. In a PyInstaller build the kiosk
+executable (``RetroverseTerminal.exe``, also when called from the console
+CLI ``nestris-terminal.exe`` next to it) is registered; in development
+``pythonw -m nestris_terminal`` is used so no console window appears.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+KIOSK_EXE = "RetroverseTerminal.exe"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "NestrisTerminal"
 
@@ -22,7 +24,8 @@ def is_supported() -> bool:
 
 def launch_command(config: Path | None = None) -> str:
     if getattr(sys, "frozen", False):
-        args = [sys.executable]
+        kiosk = Path(sys.executable).with_name(KIOSK_EXE)
+        args = [str(kiosk if kiosk.exists() else sys.executable)]
     else:
         python = Path(sys.executable)
         pythonw = python.with_name("pythonw.exe")

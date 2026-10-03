@@ -18,15 +18,14 @@ It is a client of [NestrisLTM](../nestris-ltm) (host app) and replaces
 
 1. NestrisLTM: *Einstellungen → API-Tokens* → create a token with the
    `terminal` scope.
-2. Install and start the terminal (`uv sync`, `cd frontend; pnpm install;
-   pnpm build`, `uv run nestris-terminal`).
-3. Open the hidden menu (tap the logo 5 times, default PIN **2580**), enter
-   the host URL (`http://<host-ip>:7990`) and the token, pick the reader
-   port, **change the PIN**.
+2. Run `RetroverseTerminal-Setup-<version>.exe` as the kiosk user; enter the
+   NestrisLTM address (`http://<host-ip>:7990`) and the token.
+3. Open the hidden menu (tap the logo 5 times, default PIN **2580**), check
+   the reader port and **change the PIN**.
 
-Settings live in `%APPDATA%\NestrisTerminal\config.toml`
-(`uv run nestris-terminal config-path`); see
-[config.example.toml](config.example.toml).
+Full guide (Windows kiosk settings, troubleshooting, files):
+[docs/OPERATIONS.md](docs/OPERATIONS.md). Build the installer with
+`packaging\build.ps1`.
 
 ## Development
 

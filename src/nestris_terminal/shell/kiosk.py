@@ -150,7 +150,12 @@ def run_kiosk(settings: Settings, *, windowed: bool = False) -> int:
         window.show()
     else:
         window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        # A dedicated kiosk PC: stay above anything Windows opens (updates,
+        # notifications) and take the focus even when started in the background.
+        window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         window.showFullScreen()
+        window.raise_()
+        window.activateWindow()
     code = app.exec()
     core.stop(timeout_s=10.0)
     server.close()

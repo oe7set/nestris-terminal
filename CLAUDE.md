@@ -24,7 +24,14 @@ uv run nestris-terminal --windowed     # kiosk UI in a normal window
 uv run nestris-terminal --headless     # bridge only; open http://127.0.0.1:7991
 cd frontend; pnpm install; pnpm build  # UI -> src/nestris_terminal/web (git-ignored)
 pnpm check; pnpm test; pnpm dev        # svelte-check, vitest, Vite dev server (proxies the bridge)
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1   # UI + PyInstaller (+ Inno Setup installer)
 ```
+
+Packaging: `packaging/nestris-terminal.spec` builds one folder with two
+executables, `RetroverseTerminal.exe` (kiosk, no console; autostart target)
+and `nestris-terminal.exe` (console CLI: `configure`, `autostart`, `set-pin`,
+`--headless`). `packaging/installer.iss` asks for host URL + token and calls
+`nestris-terminal.exe configure`. Operations guide: `docs/OPERATIONS.md`.
 
 The NestrisLTM side lives in `../nestris-ltm` (`src/nestris_ltm/api/routes_terminal.py`);
 run that app (or `uv run nestris-ltm --headless` there) to develop end to end.

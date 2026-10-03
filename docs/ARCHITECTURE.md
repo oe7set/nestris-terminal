@@ -111,4 +111,5 @@ tests/
    UI layout: `frontend/src/lib/flow.svelte.ts` is the screen state machine
    (cards + idle timeout), `screens/` holds one component per screen,
    `components/Keyboard.svelte` + `TextField.svelte` replace the OS keyboard.
-4. Packaging (PyInstaller, autostart) and the operations guide.
+4. Packaging (PyInstaller, autostart) and the operations guide. **Done**
+   (`packaging/`, `docs/OPERATIONS.md`).

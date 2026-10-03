@@ -4,6 +4,8 @@ nestris-terminal                 kiosk (full screen)
 nestris-terminal --windowed      kiosk UI in a normal window (development)
 nestris-terminal --headless      bridge only; open http://127.0.0.1:7991
 nestris-terminal set-pin         set the admin PIN of the hidden menu
+nestris-terminal configure ...   set host URL / token / reader (used by the installer)
+nestris-terminal autostart on|off|status
 nestris-terminal config-path     print the config file location
 """
 
@@ -37,7 +39,47 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("set-pin", help="set the admin PIN of the hidden config menu")
     sub.add_parser("config-path", help="print the config file location")
+    conf = sub.add_parser("configure", help="set connection settings without the touch menu")
+    conf.add_argument("--host", help="NestrisLTM base URL, e.g. http://192.168.1.10:7990")
+    conf.add_argument("--token", help="API token with the 'terminal' scope")
+    conf.add_argument("--reader-port", help="serial port of the reader, '' = automatic")
+    conf.add_argument("--driver", choices=["serial", "fake"], help="card reader driver")
+    conf.add_argument("--lang", choices=["de", "en"], help="UI language")
+    auto = sub.add_parser("autostart", help="start the kiosk when this Windows user signs in")
+    auto.add_argument("state", choices=["on", "off", "status"])
     return parser
+
+
+def _configure(args: argparse.Namespace) -> int:
+    from nestris_terminal.config import Settings
+
+    settings = load_settings(args.config)
+    data = settings.model_dump(mode="python")
+    data["host"]["token"] = settings.host.token.get_secret_value()
+    if args.host:
+        data["host"]["url"] = args.host.strip().rstrip("/")
+    if args.token:
+        data["host"]["token"] = args.token.strip()
+    if args.reader_port is not None:
+        data["rfid"]["port"] = args.reader_port.strip()
+    if args.driver:
+        data["rfid"]["driver"] = args.driver
+    if args.lang:
+        data["kiosk"]["lang"] = args.lang
+    print(f"Saved to {save_settings(Settings.model_validate(data), args.config)}")
+    return 0
+
+
+def _autostart(args: argparse.Namespace) -> int:
+    from nestris_terminal.shell import autostart
+
+    if not autostart.is_supported():
+        print("Autostart is only supported on Windows.", file=sys.stderr)
+        return 2
+    if args.state != "status":
+        autostart.set_enabled(args.state == "on")
+    print("on" if autostart.is_enabled() else "off")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -45,6 +87,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "config-path":
         print(args.config)
         return 0
+
+    if args.command == "configure":
+        return _configure(args)
+    if args.command == "autostart":
+        return _autostart(args)
 
     settings = load_settings(args.config)
     configure_logging(settings)
