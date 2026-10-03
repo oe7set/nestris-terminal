@@ -1,7 +1,7 @@
 # Builds the Retroverse Terminal for Windows:
 #   1. the touch UI (frontend/ -> src/nestris_terminal/web)
 #   2. the PyInstaller folder dist/RetroverseTerminal
-#   3. the installer dist/RetroverseTerminal-Setup-<version>.exe (if Inno Setup 6 is installed)
+#   3. the installer dist/RetroverseTerminal-Setup-<version>.exe (if Inno Setup 6/7 is installed; or set $env:ISCC)
 #
 # Usage (from the repository root):  powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 param([switch]$SkipUi, [switch]$SkipInstaller)
@@ -34,12 +34,15 @@ if ($LASTEXITCODE) { throw "the built CLI does not start" }
 if ($SkipInstaller) { return }
 $iscc = @(
     (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source,
+    $env:ISCC,
+    "$env:ProgramFiles\Inno Setup 7\ISCC.exe",
+    "$env:LOCALAPPDATA\Programs\Inno Setup 7\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
 ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if (-not $iscc) {
-    Write-Warning "Inno Setup 6 not found: skipping the installer (winget install JRSoftware.InnoSetup)."
+    Write-Warning "Inno Setup not found: skipping the installer (winget install JRSoftware.InnoSetup)."
     return
 }
 & $iscc "/DAppVersion=$version" packaging\installer.iss

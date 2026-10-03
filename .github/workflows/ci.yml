@@ -1,0 +1,61 @@
+# Lint, type check and tests on every push and pull request.
+#
+# The UI links the shared NES package from the NestrisLTM repository
+# (frontend/package.json: link:../../nestris-ltm/...), so the frontend job
+# checks that repository out next to this one. Repository variables:
+#   NESTRIS_LTM_REPO  owner/name of the NestrisLTM repository (default: <owner>/nestris-ltm)
+#   NESTRIS_LTM_REF   branch or tag to use (default: main)
+# and, if that repository is private, the secret NESTRIS_LTM_TOKEN
+# (fine-grained token with read access to its contents).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.NESTRIS_LTM_REPO || format('{0}/nestris-ltm', github.repository_owner) }}
+          ref: ${{ vars.NESTRIS_LTM_REF || 'main' }}
+          token: ${{ secrets.NESTRIS_LTM_TOKEN || github.token }}
+          path: _nestris-ltm
+      - name: Place NestrisLTM next to this repository
+        run: mv _nestris-ltm ../nestris-ltm
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install (shared package and terminal UI)
+        run: |
+          (cd ../nestris-ltm/frontend && pnpm install --frozen-lockfile)
+          (cd frontend && pnpm install --frozen-lockfile)
+      - working-directory: frontend
+        run: pnpm check && pnpm test && pnpm build

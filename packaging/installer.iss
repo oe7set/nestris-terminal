@@ -1,4 +1,4 @@
-; Inno Setup 6 script for the Retroverse Terminal (built by packaging\build.ps1).
+; Inno Setup 6/7 script for the Retroverse Terminal (built by packaging\build.ps1).
 ;
 ; - installs dist\RetroverseTerminal (PyInstaller folder)
 ; - asks for the NestrisLTM address and the API token and writes them into

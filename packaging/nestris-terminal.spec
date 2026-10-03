@@ -16,13 +16,17 @@ WEB = SRC / "nestris_terminal" / "web"
 if not (WEB / "index.html").is_file():
     raise SystemExit("UI not built: run 'pnpm build' in frontend/ (or packaging/build.ps1)")
 
+# Dev tools in the venv that the analysis would otherwise drag in (pydantic
+# ships a mypy plugin).
+DEV_TOOLS = ["mypy", "mypyc", "librt", "ast_serialize", "pytest", "_pytest", "ruff", "pyinstaller"]
+
 a = Analysis(
     [str(SRC / "nestris_terminal" / "__main__.py")],
     pathex=[str(SRC)],
     datas=[(str(WEB), "nestris_terminal/web")],
     # uvicorn picks its loop/protocol implementations by name at runtime.
     hiddenimports=collect_submodules("uvicorn") + ["nestris_terminal.bridge.app"],
-    excludes=["tkinter", "PySide6.Qt3DCore", "PySide6.QtQuick3D", "PySide6.QtCharts",
+    excludes=["tkinter", *DEV_TOOLS, "PySide6.Qt3DCore", "PySide6.QtQuick3D", "PySide6.QtCharts",
               "PySide6.QtDataVisualization", "PySide6.QtMultimedia", "PySide6.QtPdf",
               "PySide6.QtBluetooth", "PySide6.QtSensors"],
     noarchive=False,
