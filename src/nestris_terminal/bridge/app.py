@@ -30,7 +30,7 @@ from nestris_terminal.config import check_pin, hash_pin, save_settings
 from nestris_terminal.host.client import HostError
 from nestris_terminal.logging_setup import ring_buffer
 from nestris_terminal.rfid import protocol
-from nestris_terminal.rfid.card import CardWriteError
+from nestris_terminal.rfid.card import CardWriteError, ReaderCommandError
 from nestris_terminal.rfid.driver import FakeDriver, list_ports
 
 if TYPE_CHECKING:
@@ -75,6 +75,8 @@ class ScoreIn(BaseModel):
 
 class WriteIn(BaseModel):
     name: str = Field(min_length=1, max_length=protocol.MAX_NAME)
+    # Only write this card (the one the player just registered with).
+    uid: str | None = Field(default=None, pattern=r"^[0-9A-Fa-f]{8}([0-9A-Fa-f]{6}){0,2}$")
 
 
 class PinIn(BaseModel):
@@ -94,18 +96,20 @@ class ConfigIn(BaseModel):
     new_pin: str | None = Field(default=None, pattern=r"^\d{4,12}$")
 
 
-class WifiIn(BaseModel):
-    ssid: str = Field(min_length=1, max_length=32)
-    password: str = Field(max_length=64)
-    device: str = Field(default="rfid-terminal", max_length=32)
-    ip: str = Field(default="", max_length=64)
-    port: int = Field(default=5000, ge=1, le=65535)
+class ReaderConfigIn(BaseModel):
+    display: str | None = Field(default=None, pattern=r"^(128x32|128x64|none)$")
+    lang: str | None = Field(default=None, pattern=r"^(de|en)$")
+    brightness: int | None = Field(default=None, ge=0, le=255)
+    flip: bool | None = None
 
 
 class FakeCardIn(BaseModel):
     action: str = Field(pattern=r"^(place|remove)$")
-    uid: str = Field(default="04A1B2C3D4", max_length=32)
+    uid: str = Field(default="04A1B2C3", max_length=32)
     name: str | None = None
+    format: str | None = Field(
+        default=None, pattern=r"^(retroverse|legacy|blank|corrupt|unreadable|unsupported)$"
+    )
 
 
 # ---------------------------------------------------------------- helpers
@@ -164,7 +168,33 @@ async def register(body: RegisterIn, request: Request) -> Any:
 
 @api.get("/players/{player_id}")
 async def profile(player_id: int, request: Request) -> Any:
-    return await _host(rt(request).host.profile(player_id))
+    runtime = rt(request)
+    data = await _host(runtime.host.profile(player_id))
+    _show_on_reader(runtime, data)
+    return data
+
+
+def _show_on_reader(runtime: Runtime, profile: Any) -> None:
+    """Greet the player on the reader's display: nickname + best score."""
+    card = runtime.cards.card
+    if card is None or not isinstance(profile, dict):
+        return
+    nickname = str((profile.get("player") or {}).get("nickname") or "")
+    current = profile.get("current") or {}
+    best = (current.get("standing") or {}).get("best_score") or (profile.get("all_time") or {}).get(
+        "best_score"
+    )
+    en = runtime.settings.kiosk.lang == "en"
+    lines = [nickname]
+    if isinstance(best, int):
+        sep = "," if en else "."
+        lines.append(("Best " if en else "Bestwert ") + f"{best:,}".replace(",", sep))
+    task = asyncio.get_running_loop().create_task(runtime.cards.show(lines, uid=card.uid))
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+_background: set[asyncio.Task[Any]] = set()
 
 
 @api.post("/players/{player_id}/games")
@@ -192,7 +222,11 @@ local = APIRouter(prefix="/local")
 async def write_card(body: WriteIn, request: Request) -> dict[str, Any]:
     runtime = rt(request)
     try:
-        card = await runtime.cards.write_name(body.name, runtime.settings.rfid.write_timeout_s)
+        card = await runtime.cards.write_name(
+            body.name,
+            runtime.settings.rfid.write_timeout_s,
+            uid=body.uid.upper() if body.uid else None,
+        )
     except CardWriteError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"ok": True, "card": card.as_dict()}
@@ -260,14 +294,22 @@ async def ports(_: AdminDep) -> list[dict[str, Any]]:
     return await asyncio.to_thread(list_ports)
 
 
-@local.post("/admin/reader-wifi")
-async def reader_wifi(body: WifiIn, request: Request, _: AdminDep) -> dict[str, bool]:
-    line = protocol.wifi_config(
-        ssid=body.ssid, password=body.password, device=body.device, ip=body.ip, port=body.port
-    )
-    if not rt(request).cards.driver.send(line):
-        raise HTTPException(409, "reader not connected")
-    return {"ok": True}
+@local.get("/admin/reader")
+async def reader_info(request: Request, _: AdminDep) -> dict[str, Any]:
+    return rt(request).cards.snapshot()
+
+
+@local.put("/admin/reader")
+async def reader_config(body: ReaderConfigIn, request: Request, _: AdminDep) -> dict[str, Any]:
+    """Settings stored in the reader itself (display size, language, brightness)."""
+    settings = body.model_dump(exclude_none=True)
+    if not settings:
+        raise HTTPException(422, "nothing to change")
+    try:
+        await rt(request).cards.configure(**settings)
+    except ReaderCommandError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return rt(request).cards.snapshot()
 
 
 @local.post("/admin/test-host")
@@ -303,7 +345,7 @@ async def fake_card(body: FakeCardIn, request: Request, _: AdminDep) -> dict[str
     if not isinstance(driver, FakeDriver):
         raise HTTPException(409, "only with rfid.driver = fake")
     if body.action == "place":
-        driver.place(body.uid, body.name or None)
+        driver.place(body.uid, body.name or None, body.format)
     else:
         driver.remove()
     return {"ok": True}

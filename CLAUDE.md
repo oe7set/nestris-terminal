@@ -48,8 +48,9 @@ run that app (or `uv run nestris-ltm --headless` there) to develop end to end.
   NestrisLTM (`/api/terminal/v1/*`).
 - Privacy on a public screen: only nicknames are shown, a player page closes
   when the card leaves (3 s grace) or after 2 minutes idle.
-- RFID access goes through the driver interface in `rfid/driver.py`; the
-  serial driver speaks the current ESP32 firmware's JSON lines. A new reader
-  firmware gets a new driver, not changes elsewhere.
+- The reader speaks protocol v2 (`../nestris-rfid-reader/docs/PROTOCOL.md`,
+  the contract): `rfid/protocol.py` parses it, `rfid/card.py` keeps the state
+  and sends commands, `rfid/driver.py` is the transport plus `FakeDriver`
+  (a simulated v2 reader). Protocol changes start in the reader repository.
 - Shared NES rendering, NGF decoding and the replay clock come from
   `../nestris-ltm/frontend/packages/nes` (`@nestris-ltm/nes`, file dependency).

@@ -25,6 +25,7 @@
   let takenBy = $state("");
   let writeError = $state("");
   let player = $state<PlayerRef | null>(null);
+  let regCard = $state<CardInfo | null>(null);  // the card the player registered with
 
   const cleanNick = $derived(nickname.trim().replace(/\s+/g, " "));
   const nickValid = $derived(NICKNAME_RE.test(cleanNick));
@@ -73,6 +74,10 @@
 
   async function check(card: CardInfo): Promise<void> {
     if (step !== "card") return;
+    if (card.format === "unsupported") {
+      flow.notice = { kind: "info", key: "error.unsupported_card" };
+      return; // keep waiting for a real player card
+    }
     step = "checking";
     try {
       const found = await api<CardLookup>(`/api/card/${encodeURIComponent(card.uid)}`, {
@@ -92,6 +97,7 @@
 
   async function submit(card: CardInfo): Promise<void> {
     step = "saving";
+    regCard = card;
     try {
       const r = await api<{ player: PlayerRef }>("/api/players", {
         method: "POST",
@@ -126,7 +132,11 @@
     if (!player) return;
     step = "writing";
     try {
-      await api("/local/card/write", { method: "POST", body: { name: player.nickname } });
+      // Only this card: a different card placed meanwhile is never overwritten.
+      await api("/local/card/write", {
+        method: "POST",
+        body: { name: player.nickname, uid: regCard?.uid ?? undefined },
+      });
       step = bridge.card ? "remove" : "done";
     } catch (e) {
       writeError = e instanceof ApiError ? e.detail : String(e);
@@ -139,7 +149,7 @@
       if (e.type !== "card") return;
       flow.touch();
       if (e.state === "present") {
-        if (step === "card") void check({ uid: e.uid as string, name: (e.name as string) ?? null });
+        if (step === "card") void check({ uid: e.uid as string, name: (e.name as string) ?? null, format: e.format as string });
       } else if (step === "taken") {
         step = "card";
       } else if (step === "remove") {

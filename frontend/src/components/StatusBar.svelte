@@ -36,7 +36,8 @@
     <span class="warn-pill">{t("status.bridge_down")}</span>
   {:else}
     {#if bridge.hostReachable === false}<span class="warn-pill">{t("status.host_down")}</span>{/if}
-    {#if !bridge.readerConnected}<span class="warn-pill">{t("status.reader_down")}</span>{/if}
+    {#if bridge.readerError}<span class="warn-pill">{t("status.reader_old")}</span>
+    {:else if !bridge.readerConnected}<span class="warn-pill">{t("status.reader_down")}</span>{/if}
   {/if}
   <div class="clock mono">
     {clock.toLocaleTimeString(bridge.kiosk.lang === "en" ? "en-GB" : "de-AT", { hour: "2-digit", minute: "2-digit" })}

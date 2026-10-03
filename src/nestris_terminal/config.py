@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 import tomli_w
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -64,9 +64,16 @@ class RfidSettings(BaseModel):
     # Empty = pick the first USB serial port that looks like the ESP32 reader.
     port: str = ""
     baud: int = 115200
-    # The reader reports the card every 750 ms; silence this long = removed.
-    removed_after_s: float = Field(default=2.0, gt=0)
-    write_timeout_s: float = Field(default=15.0, gt=0)
+    write_timeout_s: float = Field(default=15.0, gt=0, le=60)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy_keys(cls, data: Any) -> Any:
+        # Reader protocol v1: the terminal decided when a card was removed.
+        # The v2 firmware does that itself; old config files still carry the key.
+        if isinstance(data, dict):
+            data = {k: v for k, v in data.items() if k != "removed_after_s"}
+        return data
 
 
 class KioskSettings(BaseModel):

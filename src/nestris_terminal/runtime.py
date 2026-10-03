@@ -43,9 +43,7 @@ class Runtime:
         self.started_at = datetime.now(UTC)
         self.events = Broadcaster()
         self.host = HostClient(settings.host, transport=host_transport)
-        self.cards = CardTracker(
-            make_driver(settings), removed_after_s=settings.rfid.removed_after_s
-        )
+        self.cards = CardTracker(make_driver(settings))
         self.cards.add_listener(self.events.publish)
         self.loop: asyncio.AbstractEventLoop | None = None
         self._tasks: set[asyncio.Task[Any]] = set()
@@ -81,9 +79,7 @@ class Runtime:
         await self.host.close()
         self.settings = settings
         self.host = HostClient(settings.host)
-        self.cards = CardTracker(
-            make_driver(settings), removed_after_s=settings.rfid.removed_after_s
-        )
+        self.cards = CardTracker(make_driver(settings))
         self.cards.add_listener(self.events.publish)
         self.cards.start()
         self._reader_connected = None
@@ -130,12 +126,21 @@ class Runtime:
     # ------------------------------------------------------------ monitors
 
     async def _monitor_reader(self) -> None:
+        last: tuple[bool, str | None] | None = None
         while True:
-            connected = self.cards.driver.connected
-            if connected != self._reader_connected:
-                self._reader_connected = connected
+            # "connected" for the UI = a v2 reader introduced itself.
+            state = (self.cards.ready, self.cards.protocol_error)
+            if state != last:
+                last = state
+                self._reader_connected = state[0]
                 self.events.publish(
-                    {"type": "reader", "connected": connected, "port": self.cards.driver.port}
+                    {
+                        "type": "reader",
+                        "connected": state[0],
+                        "port": self.cards.driver.port,
+                        "error": state[1],
+                        "info": self.cards.reader_info(),
+                    }
                 )
             await asyncio.sleep(0.5)
 

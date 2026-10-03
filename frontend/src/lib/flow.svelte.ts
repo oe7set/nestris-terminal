@@ -38,7 +38,7 @@ class Flow {
     addEventListener("pointerdown", () => this.touch(), { capture: true });
     bridge.on((e) => {
       if (e.type !== "card") return;
-      if (e.state === "present") void this.cardPresent({ uid: e.uid as string, name: (e.name as string) ?? null });
+      if (e.state === "present") void this.cardPresent({ uid: e.uid as string, name: (e.name as string) ?? null, format: e.format as string });
       else this.cardRemoved();
     });
     setInterval(() => this.#checkIdle(), 1000);
@@ -76,6 +76,11 @@ class Flow {
     const current = this.screen.name;
     if (current === "register" || current === "admin") return; // they handle cards
     if (this.session?.uid === card.uid) return; // same card back on the reader
+    if (card.format === "unsupported") {
+      // e.g. a phone or a bank card: not a player card.
+      this.notice = { kind: "info", key: "error.unsupported_card" };
+      return;
+    }
     const seq = ++this.#lookupSeq;
     this.busy = true;
     try {

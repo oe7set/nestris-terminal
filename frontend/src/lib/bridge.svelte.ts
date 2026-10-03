@@ -3,6 +3,7 @@
 export interface CardInfo {
   uid: string;
   name: string | null;
+  format?: string;
 }
 
 export interface KioskConfig {
@@ -19,6 +20,7 @@ class Bridge {
   connected = $state(false);
   card = $state<CardInfo | null>(null);
   readerConnected = $state(false);
+  readerError = $state<string | null>(null);  // e.g. old reader firmware
   hostReachable = $state<boolean | null>(null);
   hostError = $state<string | null>(null);
   eventName = $state<string | null>(null);
@@ -63,7 +65,8 @@ class Bridge {
         const s = msg.data;
         this.version = s.version;
         this.kiosk = s.kiosk;
-        this.readerConnected = s.reader.connected;
+        this.readerConnected = s.reader.ready;
+        this.readerError = s.reader.info?.protocol_error ?? null;
         this.hostReachable = s.host.reachable;
         this.hostError = s.host.error;
         this.eventName = s.host.event?.name ?? null;
@@ -73,10 +76,11 @@ class Bridge {
         break;
       }
       case "card":
-        this.card = msg.state === "present" ? { uid: msg.uid, name: msg.name } : null;
+        this.card = msg.state === "present" ? { uid: msg.uid, name: msg.name, format: msg.format } : null;
         break;
       case "reader":
         this.readerConnected = msg.connected;
+        this.readerError = msg.error ?? null;
         break;
       case "host":
         this.hostReachable = msg.reachable;
@@ -90,7 +94,8 @@ class Bridge {
   }
 
   #emit(msg: { type: string; [key: string]: unknown }): void {
-    if (msg.type === "card" && msg.state === "present") this.card = { uid: msg.uid as string, name: (msg.name as string) ?? null };
+    if (msg.type === "card" && msg.state === "present")
+      this.card = { uid: msg.uid as string, name: (msg.name as string) ?? null, format: msg.format as string };
     for (const l of this.#listeners) l(msg);
   }
 }

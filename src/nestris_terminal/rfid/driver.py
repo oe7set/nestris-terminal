@@ -1,18 +1,19 @@
 """Reader drivers: the transport between the terminal and the RFID reader.
 
 A driver delivers raw text lines from the reader to ``on_line`` (from its
-own thread) and sends lines to it. A new reader firmware or transport only
-needs a new driver here; the card logic in ``card.py`` stays the same.
+own thread) and sends lines to it. The protocol (v2, ``protocol.py``) is
+handled by ``card.py``; a new transport only needs a new driver here.
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 import structlog
 
@@ -21,6 +22,8 @@ from nestris_terminal.rfid import protocol
 log = structlog.get_logger(__name__)
 
 LineCallback = Callable[[str], None]
+
+SILENCE_LIMIT_S = 6.0
 
 # USB-UART chips used on ESP32 dev boards (Silicon Labs CP210x, WCH CH340/CH9102, FTDI).
 ESP32_USB_VIDS = {0x10C4, 0x1A86, 0x0403}
@@ -136,8 +139,9 @@ class SerialDriver:
                     if raw:
                         last_data = time.monotonic()
                         on_line(raw.decode("utf-8", "replace")[:1024])
-                    elif time.monotonic() - last_data > 10:
-                        raise OSError("reader silent for 10 s")
+                    elif time.monotonic() - last_data > SILENCE_LIMIT_S:
+                        # v2 sends a status line every 2 s: three missed = hung or unplugged.
+                        raise OSError(f"reader silent for {SILENCE_LIMIT_S:.0f} s")
             except (OSError, serial.SerialException) as exc:
                 log.warning("rfid reader lost", port=port, error=str(exc))
             finally:
@@ -150,18 +154,24 @@ class SerialDriver:
 
 @dataclass
 class FakeDriver:
-    """Simulated reader for development and tests (debug menu: place/remove card).
+    """Simulated v2 reader for development and tests (debug menu: place/remove).
 
-    Behaves like the firmware: reports the card every ``interval_s`` and writes
-    a pending ``setname`` on the next report.
+    Behaves like the firmware: ``hello`` on start, ``card`` events on changes,
+    a ``status`` heartbeat, a ``result`` for every command, writes that wait
+    for a (matching) card.
     """
 
-    interval_s: float = 0.75
-    card: protocol.Reading | None = None
+    interval_s: float = 2.0
+    card: protocol.CardData | None = None
     fail_writes: bool = False
+    fw: str = "0.0.0-fake"
+    proto: int = protocol.PROTOCOL
     sent: list[str] = field(default_factory=list)
-    _pending_name: str | None = None
+    shown: list[str] = field(default_factory=list)
+    settings: dict[str, Any] = field(default_factory=lambda: {"display": "128x32", "lang": "de"})
+    _pending: dict[str, Any] | None = None
     _stop: threading.Event = field(default_factory=threading.Event)
+    _lock: threading.RLock = field(default_factory=threading.RLock)
     _thread: threading.Thread | None = None
     _on_line: LineCallback | None = None
 
@@ -177,54 +187,120 @@ class FakeDriver:
         self._on_line = on_line
         self._thread = threading.Thread(target=self._run, name="rfid-fake", daemon=True)
         self._thread.start()
+        self._hello(None)
 
     def stop(self) -> None:
         self._stop.set()
 
+    # ---------------------------------------------------------------- reader side
+
+    def _out(self, data: dict[str, Any]) -> None:
+        if self._on_line is not None:
+            self._on_line(json.dumps(data))
+
+    def _hello(self, cid: int | None) -> None:
+        data: dict[str, Any] = {
+            "type": "hello", "proto": self.proto, "fw": self.fw, "build": "", "board": "fake",
+            "serial": "FAKE00000001", "display": self.settings["display"],
+            "lang": self.settings["lang"], "reader": "ok", "chip": "0x92",
+            "card": self.card.as_dict() if self.card else None,
+        }  # fmt: skip
+        if cid is not None:
+            data["id"] = cid
+        self._out(data)
+
+    def _result(self, cid: Any, ok: bool = True, **extra: Any) -> None:
+        self._out({"type": "result", "id": cid, "ok": ok, **extra})
+
     def send(self, line: str) -> bool:
         self.sent.append(line)
-        import json
-
-        data = json.loads(line)
-        if data.get("type") == "setname":
-            self._pending_name = str(data["value"])
+        cmd = json.loads(line)
+        cid = cmd.get("id")
+        kind = cmd.get("type")
+        with self._lock:
+            if kind == "hello":
+                self._hello(cid)
+            elif kind in ("ping", "reboot"):
+                self._result(cid)
+            elif kind == "write":
+                if self._pending is not None:
+                    self._result(cid, False, error="busy")
+                else:
+                    deadline = time.monotonic() + int(cmd.get("timeout_ms", 15000)) / 1000
+                    self._pending = {**cmd, "deadline": deadline, "wrong": False}
+                    self._try_write()
+            elif kind == "show":
+                if self.card is None:
+                    self._result(cid, False, error="no_card")
+                elif cmd.get("uid") and cmd["uid"].upper() != self.card.uid:
+                    self._result(cid, False, error="wrong_card")
+                else:
+                    self.shown = list(cmd.get("lines", []))
+                    self._result(cid)
+            elif kind == "cancel":
+                if self._pending is not None:
+                    self._result(self._pending.get("id"), False, error="cancelled")
+                    self._pending = None
+                self._result(cid)
+            elif kind == "config":
+                self.settings.update({k: v for k, v in cmd.items() if k not in ("type", "id")})
+                self._result(cid)
+                self._hello(None)
+            else:
+                self._result(cid, False, error="unknown_type", detail=str(kind))
         return True
 
-    def place(self, uid: str, name: str | None) -> None:
-        self.card = protocol.Reading(uid.upper(), name)
-        self.tick()
+    def _try_write(self) -> None:
+        w = self._pending
+        if w is None:
+            return
+        if time.monotonic() >= w["deadline"]:
+            self._result(w.get("id"), False, error="wrong_card" if w["wrong"] else "timeout")
+            self._pending = None
+            return
+        card = self.card
+        if card is None:
+            return
+        if w.get("uid") and w["uid"].upper() != card.uid:
+            w["wrong"] = True
+            return
+        self._pending = None
+        if self.fail_writes:
+            self._result(
+                w.get("id"), False, error="write", detail="the card did not accept the write"
+            )
+            return
+        self.card = protocol.CardData(card.uid, str(w["name"]), "retroverse")
+        self._result(w.get("id"), True, uid=card.uid, name=w["name"])
+        self._out({"type": "card", "state": "present", **self.card.as_dict()})
+
+    # ---------------------------------------------------------------- bench controls
+
+    def place(self, uid: str, name: str | None, fmt: str | None = None) -> None:
+        with self._lock:
+            uid = uid.upper()
+            if self.card is not None and self.card.uid != uid:
+                self._out({"type": "card", "state": "removed", "uid": self.card.uid})
+            self.card = protocol.CardData(uid, name or None, fmt or ("legacy" if name else "blank"))
+            self.shown = []
+            self._out({"type": "card", "state": "present", **self.card.as_dict()})
+            self._try_write()
 
     def remove(self) -> None:
-        self.card = None
+        with self._lock:
+            if self.card is not None:
+                self._out({"type": "card", "state": "removed", "uid": self.card.uid})
+            self.card = None
+            self.shown = []
 
     def tick(self) -> None:
-        """One report, like the firmware's read cycle."""
-        if self._on_line is None:
-            return
-        import json
-
-        card = self.card
-        if card is not None and self._pending_name is not None:
-            name, self._pending_name = self._pending_name, None
-            if self.fail_writes:
-                self._on_line("Write failed: STATUS_TIMEOUT")
-            else:
-                self.card = card = protocol.Reading(card.uid, name)
-                self._on_line("Name erfolgreich auf Karte geschrieben.")
-        if card is None:
-            self._on_line(json.dumps({"type": "login", "username": "Unbekannt", "source": "rfid"}))
-        else:
-            self._on_line(
-                json.dumps(
-                    {
-                        "type": "login",
-                        "username": card.name or "Unbekannt",
-                        "uid": card.uid,
-                        "scoreloaded": "0",
-                        "source": "rfid",
-                    }
-                )
-            )
+        """Heartbeat and write timeouts, like the firmware's loop."""
+        with self._lock:
+            self._try_write()
+            self._out({
+                "type": "status", "card": self.card.as_dict() if self.card else None,
+                "reader": "ok", "uptime_s": 0, "host": True,
+            })  # fmt: skip
 
     def _run(self) -> None:
         while not self._stop.wait(self.interval_s):

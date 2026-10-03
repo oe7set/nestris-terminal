@@ -36,7 +36,7 @@
   let unlocked = $state(false);
   let pin = $state("");
   let pinError = $state(false);
-  let tab = $state<"settings" | "wifi" | "debug">("settings");
+  let tab = $state<"settings" | "reader" | "debug">("settings");
   let message = $state<{ ok: boolean; text: string } | null>(null);
 
   // settings
@@ -53,12 +53,23 @@
   let grace = $state("3");
   let newPin = $state("");
 
-  // wifi
-  let ssid = $state("");
-  let wifiPassword = $state("");
-  let device = $state("rfid-terminal");
-  let targetIp = $state("");
-  let targetPort = $state("5000");
+  // reader (settings stored in the reader itself)
+  interface ReaderSnapshot {
+    ready: boolean;
+    port: string | null;
+    info: {
+      fw: string | null;
+      serial: string | null;
+      display: string | null;
+      chip: string | null;
+      reader_ok: boolean | null;
+      protocol_error: string | null;
+    };
+  }
+  let reader = $state<ReaderSnapshot | null>(null);
+  let readerDisplay = $state("128x32");
+  let readerFlip = $state(false);
+  let readerBrightness = $state("200");
 
   // debug
   let debug = $state<Record<string, unknown> | null>(null);
@@ -134,14 +145,29 @@
     }
   }
 
-  async function sendWifi(): Promise<void> {
+  async function loadReader(): Promise<void> {
+    try {
+      reader = await api<ReaderSnapshot>("/local/admin/reader");
+      if (reader.info.display) readerDisplay = reader.info.display;
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  async function saveReader(): Promise<void> {
     message = null;
     try {
-      await api("/local/admin/reader-wifi", {
-        method: "POST",
-        body: { ssid, password: wifiPassword, device, ip: targetIp, port: Number(targetPort) || 5000 },
+      reader = await api<ReaderSnapshot>("/local/admin/reader", {
+        method: "PUT",
+        body: {
+          display: readerDisplay,
+          flip: readerFlip,
+          brightness: Math.min(255, Math.max(0, Number(readerBrightness) || 0)),
+          lang: bridge.kiosk.lang,
+        },
       });
-      message = { ok: true, text: t("admin.wifi_sent") };
+      message = { ok: true, text: t("admin.reader_saved") };
+      setTimeout(() => void loadReader(), 500);  // the reader answers with a fresh hello
     } catch (e) {
       fail(e);
     }
@@ -213,6 +239,7 @@
 
   $effect(() => {
     if (tab === "debug") void refreshDebug();
+    if (tab === "reader") void loadReader();
   });
 
   function show(value: unknown): string {
@@ -255,7 +282,7 @@
     <div class="top">
       <div class="tabs">
         <button class:on={tab === "settings"} onclick={() => (tab = "settings")}>{t("admin.settings")}</button>
-        <button class:on={tab === "wifi"} onclick={() => (tab = "wifi")}>{t("admin.reader_wifi")}</button>
+        <button class:on={tab === "reader"} onclick={() => (tab = "reader")}>{t("admin.reader_tab")}</button>
         <button class:on={tab === "debug"} onclick={() => (tab = "debug")}>{t("admin.debug")}</button>
       </div>
       <span class="spacer"></span>
@@ -311,17 +338,36 @@
           <p class="muted small">{config.config_file}</p>
           <button class="primary big" onclick={save}>{t("common.save")}</button>
         </div>
-      {:else if tab === "wifi"}
+      {:else if tab === "reader"}
         <div class="grid">
-          <p class="muted">{t("admin.wifi_hint")}</p>
-          <TextField id="ssid" label={t("admin.ssid")} bind:value={ssid} maxLength={32} />
-          <TextField id="wifi_pw" label={t("admin.password")} bind:value={wifiPassword} maxLength={64} />
-          <TextField id="device" label={t("admin.device")} bind:value={device} maxLength={32} />
-          <div class="two">
-            <TextField id="target_ip" label={t("admin.target_ip")} bind:value={targetIp} layout="number" maxLength={64} />
-            <TextField id="target_port" label={t("admin.target_port")} bind:value={targetPort} layout="number" maxLength={5} />
+          {#if reader}
+            {#if reader.info.protocol_error}
+              <p class="warnline">⚠ {reader.info.protocol_error}</p>
+            {:else if !reader.ready}
+              <p class="warnline">⚠ {t("admin.reader_not_ready")}</p>
+            {/if}
+            <table>
+              <tbody>
+                <tr><th>{t("admin.reader_fw")}</th><td class="mono">{reader.info.fw ?? "–"}</td></tr>
+                <tr><th>{t("admin.reader_serial")}</th><td class="mono">{reader.info.serial ?? "–"}</td></tr>
+                <tr><th>Port</th><td class="mono">{reader.port ?? "–"}</td></tr>
+                <tr><th>RC522</th><td class="mono">{reader.info.chip ?? "–"} {reader.info.reader_ok === false ? "✕" : "✓"}</td></tr>
+                <tr><th>{t("admin.reader_display")}</th><td class="mono">{reader.info.display ?? "–"}</td></tr>
+              </tbody>
+            </table>
+          {/if}
+          <div class="group">
+            <span class="label">{t("admin.reader_display")}</span>
+            <div class="chips">
+              {#each ["128x32", "128x64", "none"] as d (d)}
+                <button class:sel={readerDisplay === d} onclick={() => (readerDisplay = d)}>{d === "none" ? t("admin.reader_no_display") : d}</button>
+              {/each}
+              <button class:sel={readerFlip} onclick={() => (readerFlip = !readerFlip)}>{readerFlip ? "✓" : "✕"} {t("admin.reader_flip")}</button>
+            </div>
           </div>
-          <button class="primary big" disabled={!ssid || !bridge.readerConnected} onclick={sendWifi}>{t("admin.send_wifi")}</button>
+          <TextField id="reader_brightness" label={t("admin.reader_brightness")} bind:value={readerBrightness} layout="number" maxLength={3} />
+          <p class="muted small">{t("admin.reader_hint")}</p>
+          <button class="primary big" disabled={!reader?.ready} onclick={saveReader}>{t("admin.reader_save")}</button>
         </div>
       {:else if tab === "debug"}
         <div class="debug">
@@ -456,6 +502,7 @@
   table {
     border-collapse: collapse;
     font-size: 17px;
+    justify-self: start;
   }
   th {
     text-align: left;

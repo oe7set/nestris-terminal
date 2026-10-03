@@ -16,7 +16,7 @@ database itself.
 | A card with a name but unknown uid (old card) | resolved by name: player page, uid gets linked |
 | *Neu anmelden* without a card | guided registration: data → *Karte auflegen* → write → *Karte bitte entnehmen* → done |
 | Card removed | player page closes after a 3 s grace period; also after 2 minutes without a touch |
-| 5 taps on the logo + PIN | hidden **config** (host URL, token, reader port, reader Wi-Fi, PIN, language, timeouts) and **debug** menu (host REST/WebSocket, reader, network, logs, test card) |
+| 5 taps on the logo + PIN | hidden **config** (host URL, token, reader port, PIN, language, timeouts), **reader** settings (display size, brightness, rotation) and **debug** menu (host REST/WebSocket, reader, network, logs, test card) |
 
 Registration asks for nickname (required, unique), first and last name and
 e-mail (optional) with a consent checkbox for the e-mail. Only the nickname
@@ -45,30 +45,35 @@ them.
   (`/api/...`), the bridge forwards to NestrisLTM's terminal API with the
   token (`/api/terminal/v1/...`).
 - Card events reach the UI over the bridge WebSocket (`/ws`):
-  `card_present {uid, name}`, `card_removed`, `reader {connected}`,
-  `write_result {ok, detail}`, `host {reachable}`.
+  `card {state: present|removed, uid, name, format}`,
+  `reader {connected, error, info}`, `reader_info`, `host {reachable}`,
+  `config {kiosk}`.
 - `--headless` runs only the bridge; open `http://127.0.0.1:7991` in a
   browser for development. A fake reader (`rfid.driver = "fake"`) lets the
   debug menu simulate cards.
 
-## RFID reader (USB, current firmware)
+## RFID reader (USB, protocol v2)
 
-Firmware: `../RFID_ESP/ESP32_CARD_READER` (ESP32 + RC522 + SSD1306), 115200
-baud, JSON lines. The reader prints
-`{"type":"login","username":..,"uid":..}` every 750 ms; no card =
-`username "Unbekannt"` without uid. Commands:
+Firmware: `../nestris-rfid-reader` (ESP32 + RC522 + SSD1306); the contract
+is its `docs/PROTOCOL.md`. JSON lines at 115200 baud:
 
-- `{"type":"setname","value":"Nick"}` writes the name to the **next** card
-  read. Success is verified by reading the card back (the next login line
-  carries the new name); a timeout or a `Write failed` line is an error.
-- `{"type":"highscore","value":"159867"}` shows a score on the OLED.
-- `{"type":"config","ip":..,"port":..,"device":..,"ssid":..,"password":..}`
-  stores the reader's Wi-Fi settings (config menu).
+- the reader says `hello` (firmware, serial, display, protocol version) on
+  boot and on request; the terminal refuses any `proto` other than 2 and
+  shows "Leser-Firmware veraltet" (the v1 sketch never says hello);
+- `card` events `present` (uid, name, format: retroverse / legacy / blank /
+  corrupt / unreadable / unsupported) and `removed` arrive immediately; the
+  reader decides when a card is gone (≈ 300 ms);
+- a `status` heartbeat every 2 s re-synchronises the card state; 6 s of
+  silence makes the serial driver reopen the port;
+- commands carry an `id` and get a `result`: `write` (name, optional `uid`
+  = only that card, read back and verified by the reader), `show` (lines on
+  the OLED, used for "nickname + Bestwert" when the player page opens),
+  `config` (display size, language, brightness, rotation; stored in the
+  reader), `ping` (every 3 s), `hello`.
 
-Presence: a card counts as removed when no line with its uid arrived for
-`rfid.removed_after_s` (default 2 s). The driver sits behind a small
-interface (`rfid/driver.py`) so the planned new reader firmware only needs
-a new driver.
+Code: `rfid/protocol.py` (messages), `rfid/card.py` (`CardTracker`: state,
+link upkeep, commands), `rfid/driver.py` (serial transport and the
+`FakeDriver`, a simulated v2 reader for development and tests).
 
 ## NestrisLTM terminal API (`/api/terminal/v1`, token scope `terminal`)
 

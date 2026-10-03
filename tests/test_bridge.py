@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,17 @@ class StubHost:
             if body["nickname"] == "Taken":
                 return httpx.Response(409, json={"detail": "nickname is already taken"})
             return httpx.Response(201, json={"player": {"id": 7, "nickname": body["nickname"]}})
+        if path == "/players/7":
+            return httpx.Response(
+                200,
+                json={
+                    "player": {"id": 7, "nickname": "Erv"},
+                    "all_time": {"best_score": 216560},
+                    "current": {"standing": {"best_score": 159867}},
+                    "events": [],
+                    "games": [],
+                },
+            )
         if path == "/games/5/recording":
             return httpx.Response(
                 200, content=b"\x1f\x8bngf", headers={"X-Recording-Source": "recording"}
@@ -84,16 +96,43 @@ async def test_forwarding_and_errors(setup: tuple[Runtime, httpx.AsyncClient, St
     assert "check host.token" in (runtime.host.last_error or "")
 
 
+async def until(check: Callable[[], object]) -> None:
+    for _ in range(200):
+        if check():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("condition not reached")
+
+
 async def test_card_write(setup: tuple[Runtime, httpx.AsyncClient, StubHost]) -> None:
     runtime, client, _ = setup
+    await until(lambda: runtime.cards.ready)
     driver = runtime.cards.driver
     assert isinstance(driver, FakeDriver)
-    driver.place("04AA", None)
-    r = await client.post("/local/card/write", json={"name": "Erv"})
-    assert r.status_code == 200 and r.json()["card"] == {"uid": "04AA", "name": "Erv"}
+    driver.place("04AA0001", None)
+    r = await client.post("/local/card/write", json={"name": "Erv", "uid": "04aa0001"})
+    assert r.status_code == 200, r.text
+    assert r.json()["card"] == {"uid": "04AA0001", "name": "Erv", "format": "retroverse"}
+    assert '"uid":"04AA0001"' in driver.sent[-1]
     driver.fail_writes = True
     r = await client.post("/local/card/write", json={"name": "Erv2"})
-    assert r.status_code == 409 and "Write failed" in r.json()["detail"]
+    assert r.status_code == 409 and r.json()["detail"].startswith("write")
+    r = await client.post("/local/card/write", json={"name": "Erv", "uid": "nothex!"})
+    assert r.status_code == 422
+
+
+async def test_profile_greets_on_the_reader(
+    setup: tuple[Runtime, httpx.AsyncClient, StubHost],
+) -> None:
+    runtime, client, _ = setup
+    await until(lambda: runtime.cards.ready)
+    driver = runtime.cards.driver
+    assert isinstance(driver, FakeDriver)
+    driver.place("04AA0001", "Erv")
+    await until(lambda: runtime.cards.card)
+    assert (await client.get("/api/players/7")).status_code == 200
+    await until(lambda: driver.shown)
+    assert driver.shown == ["Erv", "Bestwert 159.867"]
 
 
 async def test_admin_menu(
@@ -129,5 +168,13 @@ async def test_admin_menu(
     assert r.status_code == 200
     debug = (await client.get("/local/admin/debug", headers=headers)).json()
     assert "network" in debug and debug["reader"]["port"] == "fake"
+
+    await until(lambda: runtime.cards.ready)
+    r = await client.put("/local/admin/reader", headers=headers, json={"display": "128x64"})
+    assert r.status_code == 200, r.text
+    await until(lambda: runtime.cards.reader_info()["display"] == "128x64")
+    assert (await client.put("/local/admin/reader", headers=headers, json={})).status_code == 422
+    bad = await client.put("/local/admin/reader", headers=headers, json={"display": "4k"})
+    assert bad.status_code == 422
     state = (await client.get("/api/state")).json()
     assert state["kiosk"]["lang"] == "en"
