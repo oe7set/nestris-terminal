@@ -1,0 +1,33 @@
+# Retroverse Terminal configuration (%APPDATA%\NestrisTerminal\config.toml).
+# Normally edited through the hidden menu (5 taps on the logo + PIN).
+# Environment variables override it: NESTRIS_TERMINAL__HOST__TOKEN=...
+
+[host]
+url = "http://127.0.0.1:7990"     # NestrisLTM
+token = ""                         # API token with the "terminal" scope
+timeout_s = 8.0
+
+[rfid]
+driver = "serial"                  # "fake" = simulated reader (debug menu)
+port = ""                          # empty = auto-detect the ESP32 (CP210x/CH340)
+baud = 115200
+removed_after_s = 2.0              # card counts as removed after this silence
+write_timeout_s = 15.0
+
+[kiosk]
+fullscreen = true
+hide_cursor = false
+lang = "de"
+card_grace_s = 3.0                 # player page stays this long after the card left
+idle_timeout_s = 120.0             # back to the main menu without touches
+
+[admin]
+pin_hash = ""                      # empty = default PIN 2580; set via the menu or `set-pin`
+
+[http]
+host = "127.0.0.1"
+port = 7991
+
+[log]
+level = "INFO"
+to_file = true
