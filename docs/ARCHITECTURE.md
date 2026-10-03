@@ -102,9 +102,13 @@ tests/
 
 ## Phases
 
-1. Plan, repository, NestrisLTM terminal API (+ tests).
+1. Plan, repository, NestrisLTM terminal API (+ tests). **Done.**
 2. Terminal core: config, RFID drivers + card state machine, host client,
-   bridge, kiosk shell (+ tests with the fake reader and a stub host).
+   bridge, kiosk shell (+ tests with the fake reader and a stub host). **Done.**
 3. UI: main menu with highscore and replays, player page, registration
    wizard with on-screen keyboard, score entry, hidden config/debug menus.
+   **Done** (verified end to end against a dev NestrisLTM with the fake reader).
+   UI layout: `frontend/src/lib/flow.svelte.ts` is the screen state machine
+   (cards + idle timeout), `screens/` holds one component per screen,
+   `components/Keyboard.svelte` + `TextField.svelte` replace the OS keyboard.
 4. Packaging (PyInstaller, autostart) and the operations guide.
