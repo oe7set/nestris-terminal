@@ -32,3 +32,11 @@ def test_invalid_host_url(tmp_path: Path) -> None:
     path.write_text('[host]\nurl = "192.168.1.10"\n', encoding="utf-8")
     with pytest.raises(ValidationError):
         load_settings(path)
+
+
+def test_old_config_with_removed_after_still_loads(tmp_path: Path) -> None:
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[rfid]\ndriver = "fake"\nremoved_after_s = 2.0\n', encoding="utf-8")
+    settings = load_settings(cfg)
+    assert settings.rfid.driver == "fake"
+    assert "removed_after_s" not in settings.rfid.model_dump()
