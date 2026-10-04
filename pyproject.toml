@@ -1,6 +1,6 @@
 [project]
 name = "nestris-terminal"
-version = "0.2.0b1"
+version = "0.2.0b2"
 description = "Retroverse Terminal: touch kiosk for player registration, statistics, replays and the highscore (client of NestrisLTM)"
 readme = "README.md"
 license = "Apache-2.0"
