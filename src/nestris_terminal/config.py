@@ -102,6 +102,18 @@ class LogSettings(BaseModel):
     buffer_size: int = Field(default=1000, ge=100)
 
 
+class UpdateSettings(BaseModel):
+    # Automatic checks against GitHub releases; installing is always a click.
+    enabled: bool = True
+    channel: Literal["stable", "beta"] = "stable"
+    owner: str = "oe7set"
+    app_repo: str = "nestris-terminal"
+    reader_repo: str = "nestris-rfid-reader"
+    # Optional GitHub token (private forks, shared IP hitting the rate limit).
+    token: SecretStr = SecretStr("")
+    check_interval_h: float = Field(default=24.0, ge=1)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NESTRIS_TERMINAL__", env_nested_delimiter="__", extra="forbid"
@@ -116,6 +128,7 @@ class Settings(BaseSettings):
     admin: AdminSettings = Field(default_factory=AdminSettings)
     http: HttpSettings = Field(default_factory=HttpSettings)
     log: LogSettings = Field(default_factory=LogSettings)
+    updates: UpdateSettings = Field(default_factory=UpdateSettings)
 
     @classmethod
     def settings_customise_sources(
@@ -146,6 +159,7 @@ def save_settings(settings: Settings, path: Path | None = None) -> Path:
     target = path or Settings.config_file or default_config_path()
     data = settings.model_dump(mode="json", exclude={"data_dir"})
     data["host"]["token"] = settings.host.token.get_secret_value()
+    data["updates"]["token"] = settings.updates.token.get_secret_value()
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(".tmp")
     tmp.write_text(tomli_w.dumps(data), encoding="utf-8")

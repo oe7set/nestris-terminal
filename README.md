@@ -14,6 +14,14 @@ Touch kiosk for players at the Retroverse Classic Tetris tournament:
 It is a client of [NestrisLTM](../nestris-ltm) (host app) and replaces
 `RetroverseAnmledung`. Design and plan: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Download
+
+**[Latest release](https://github.com/oe7set/nestris-terminal/releases/latest)**: run
+`RetroverseTerminal-Setup-<version>.exe` on the touch PC of the player terminal (or unpack the portable zip).
+Every release is signed (`SHA256SUMS.txt` + `.sig`, see
+`nestris-ltm/docs/UPDATES.md`). Beta versions are listed under
+[all releases](https://github.com/oe7set/nestris-terminal/releases).
+
 ## Setup on the touch PC
 
 1. NestrisLTM: *Einstellungen → API-Tokens* → create a token with the

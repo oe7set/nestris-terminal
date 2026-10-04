@@ -30,7 +30,9 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1   # UI + PyInstalle
 Packaging: `packaging/nestris-terminal.spec` builds one folder with two
 executables, `RetroverseTerminal.exe` (kiosk, no console; autostart target)
 and `nestris-terminal.exe` (console CLI: `configure`, `autostart`, `set-pin`,
-`--headless`). `packaging/installer.iss` asks for host URL + token and calls
+`--headless`), plus `esptool.exe` (Espressif, GPL-2.0-or-later) as a separate
+program for reader updates. Never import `esptool` in `src/`: the updater
+(`updates/service.py`) only runs it as a child process. `packaging/installer.iss` asks for host URL + token and calls
 `nestris-terminal.exe configure`. Operations guide: `docs/OPERATIONS.md`.
 
 The NestrisLTM side lives in `../nestris-ltm` (`src/nestris_ltm/api/routes_terminal.py`);

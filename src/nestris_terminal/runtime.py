@@ -24,7 +24,8 @@ from nestris_terminal.broadcast import Broadcaster
 from nestris_terminal.config import Settings
 from nestris_terminal.host.client import HostClient, HostError
 from nestris_terminal.rfid.card import CardTracker
-from nestris_terminal.rfid.driver import FakeDriver, ReaderDriver, SerialDriver
+from nestris_terminal.rfid.driver import FakeDriver, ReaderDriver, SerialDriver, autodetect_port
+from nestris_terminal.updates.service import ReaderView, UpdateService
 
 log = structlog.get_logger(__name__)
 
@@ -43,8 +44,10 @@ class Runtime:
         self.started_at = datetime.now(UTC)
         self.events = Broadcaster()
         self.host = HostClient(settings.host, transport=host_transport)
-        self.cards = CardTracker(make_driver(settings))
-        self.cards.add_listener(self.events.publish)
+        self.cards = self._make_cards(settings)
+        self.updates = UpdateService(
+            settings, _ReaderAccess(self), request_quit=lambda: self.request_shutdown(quit_app=True)
+        )
         self.loop: asyncio.AbstractEventLoop | None = None
         self._tasks: set[asyncio.Task[Any]] = set()
         self._server: uvicorn.Server | None = None
@@ -53,6 +56,11 @@ class Runtime:
         self.quit_requested = False
 
     # ------------------------------------------------------------ lifecycle
+
+    def _make_cards(self, settings: Settings) -> CardTracker:
+        cards = CardTracker(make_driver(settings))
+        cards.add_listener(self.events.publish)
+        return cards
 
     def spawn(self, coro: Any, *, name: str) -> None:
         task = asyncio.create_task(coro, name=name)
@@ -63,6 +71,7 @@ class Runtime:
         self.cards.start()
         self.spawn(self._monitor_reader(), name="reader-monitor")
         self.spawn(self._monitor_host(), name="host-monitor")
+        self.spawn(self.updates.run(), name="update-check")
 
     async def stop(self) -> None:
         for task in list(self._tasks):
@@ -72,6 +81,7 @@ class Runtime:
                 await task
         await self.cards.stop()
         await self.host.close()
+        await self.updates.close()
 
     async def reconfigure(self, settings: Settings) -> None:
         """Apply saved settings: new host client and reader driver."""
@@ -79,9 +89,9 @@ class Runtime:
         await self.host.close()
         self.settings = settings
         self.host = HostClient(settings.host)
-        self.cards = CardTracker(make_driver(settings))
-        self.cards.add_listener(self.events.publish)
+        self.cards = self._make_cards(settings)
         self.cards.start()
+        self.updates.apply_settings(settings)
         self._reader_connected = None
         self._host_reachable = None
         self.events.publish({"type": "config", "kiosk": settings.kiosk.model_dump()})
@@ -188,6 +198,43 @@ class Runtime:
             },
             "ws_clients": self.events.count,
         }
+
+
+class _ReaderAccess:
+    """The reader as the updater sees it: port, firmware, port hand-over."""
+
+    def __init__(self, runtime: Runtime) -> None:
+        self.rt = runtime
+
+    def view(self) -> ReaderView:
+        cards = self.rt.cards
+        if isinstance(cards.driver, FakeDriver):
+            return ReaderView(port=None, fw=cards.hello.fw if cards.hello else None, fake=True)
+        connected = cards.driver.connected
+        port = cards.driver.port if connected else None
+        port = port or self.rt.settings.rfid.port or autodetect_port()
+        return ReaderView(
+            port=port,
+            fw=cards.hello.fw if cards.hello else None,
+            old_protocol=connected and cards.protocol_error is not None,
+        )
+
+    async def release(self) -> None:
+        await self.rt.cards.stop()
+
+    async def reconnect(self) -> None:
+        self.rt.cards = self.rt._make_cards(self.rt.settings)
+        self.rt.cards.start()
+
+    async def wait_hello(self, timeout_s: float) -> str | None:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+        while loop.time() < deadline:
+            hello = self.rt.cards.hello
+            if hello is not None:
+                return hello.fw
+            await asyncio.sleep(0.25)
+        return None
 
 
 def network_info() -> dict[str, Any]:

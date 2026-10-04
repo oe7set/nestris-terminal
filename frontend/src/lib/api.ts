@@ -19,6 +19,9 @@ export function errorDetail(body: unknown, fallback: string): string {
   if (body && typeof body === "object" && "detail" in body) {
     const detail = (body as { detail: unknown }).detail;
     if (typeof detail === "string") return detail;
+    if (detail && typeof detail === "object" && "message" in detail) {
+      return String((detail as { message: unknown }).message);
+    }
     if (Array.isArray(detail)) {
       return detail.map((d) => (d as { msg?: string }).msg ?? "").join("; ");
     }

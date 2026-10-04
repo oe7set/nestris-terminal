@@ -100,8 +100,10 @@ src/nestris_terminal/
   host/client.py   NestrisLTM terminal API client (httpx, token)
   bridge/          FastAPI app: static UI, /api proxy, /local config/debug, /ws events
   shell/           PySide6 kiosk window (fullscreen, no context menu/zoom), single instance
+  updates/         update service: GitHub releases, signature check, app installer, reader flashing (esptool)
   web/             built UI (git-ignored, `pnpm build` in frontend/)
 frontend/          Svelte 5 + TypeScript (Vite); uses ../nestris-ltm/frontend/packages/nes
+packaging/         PyInstaller spec (kiosk, CLI, separate esptool.exe), Inno Setup script, build.ps1
 tests/
 ```
 
@@ -118,3 +120,7 @@ tests/
    `components/Keyboard.svelte` + `TextField.svelte` replace the OS keyboard.
 4. Packaging (PyInstaller, autostart) and the operations guide. **Done**
    (`packaging/`, `docs/OPERATIONS.md`).
+5. Updates (phase U3 of `../nestris-ltm/docs/UPDATES.md`): hidden menu →
+   *Updates* for the app (installer `/update=1`, restarts the kiosk) and the
+   reader firmware (signed manifest → esptool at the app offset). **Done**;
+   flashing a real reader through the updater is still to be tried.

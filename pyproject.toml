@@ -1,6 +1,6 @@
 [project]
 name = "nestris-terminal"
-version = "0.2.0b2"
+version = "0.2.0"
 description = "Retroverse Terminal: touch kiosk for player registration, statistics, replays and the highscore (client of NestrisLTM)"
 readme = "README.md"
 license = "Apache-2.0"
@@ -16,6 +16,8 @@ dependencies = [
     "structlog>=24.4",
     "tomli-w>=1.1",
     "pyside6>=6.8",
+    "esptool>=4.8",
+    "cryptography>=43",
 ]
 
 [project.scripts]
@@ -53,7 +55,7 @@ src = ["src", "tests"]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["E501"]
+"tests/*" = ["E501", "ASYNC240"]
 
 [tool.mypy]
 python_version = "3.13"

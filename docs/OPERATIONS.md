@@ -28,7 +28,7 @@ the event. For the design see [ARCHITECTURE.md](ARCHITECTURE.md).
 4. Finish; the terminal starts in full screen.
 
 An update is the same setup run again: it stops the running kiosk, replaces
-the files and keeps the configuration.
+the files and keeps the configuration. Easier: hidden menu → *Updates* (below).
 
 Without the installer (e.g. a copy of `dist\RetroverseTerminal`):
 
@@ -95,10 +95,34 @@ the PC behave like an appliance:
 | Tab | Purpose |
 |---|---|
 | Einstellungen | NestrisLTM address and token, reader port or simulated reader, language, full screen, cursor, idle timeout (back to the menu), card grace period, new PIN. *Speichern* applies immediately, no restart. |
-| Leser-WLAN | Sends Wi-Fi name, password, device name and target IP/port to the reader's flash (for the reader firmware's Wi-Fi mode). Needs the reader connected over USB. |
+| Leser | Reader firmware, serial number, port, RC522 chip and display; settings stored in the reader itself (display 128×32 / 128×64 / none, rotate 180°, brightness). |
+| Updates | Terminal app and reader firmware from GitHub releases, see *Updates* below. |
 | Debug | Version, uptime, reader (port, lines received, current and last card), host status and event, token present, IP addresses and Wi-Fi of this PC, live log, *Verbindung testen*, simulated test card (with the simulated reader). |
 
 The menu locks itself again after 15 minutes without use or when it is closed.
+
+## Updates
+
+Hidden menu → *Updates*. The terminal checks GitHub by itself (1 minute after
+start, then daily; *Jetzt prüfen* checks now). No internet at the venue is
+fine: the tab just says so. Every download must carry the Retroverse release
+signature, otherwise nothing is installed.
+
+- **Terminal app** (`github.com/oe7set/nestris-terminal`): *Version X
+  installieren* downloads the setup, the kiosk closes, the setup runs silently
+  and starts the kiosk again (about a minute). Settings are kept.
+- **Reader firmware** (`github.com/oe7set/nestris-rfid-reader`): *Firmware X
+  aufspielen* flashes the reader over its USB cable with the bundled
+  `esptool.exe` and waits until it reports the new version. Its settings
+  (display, brightness) are kept. Do not unplug it meanwhile.
+- *Werksabbild aufspielen* appears for a reader with the old v1 firmware or
+  one that does not answer; it resets the reader's stored settings.
+- *Andere Version …* lists older releases (rollback).
+- *Stabil* / *Beta*: beta also offers pre-releases. *automatisch prüfen* off
+  stops the daily check. Stored in `config.toml` under `[updates]`.
+
+Not during play: an app update closes the kiosk, a firmware update takes the
+reader away for about a minute.
 
 ## Files
 
@@ -107,6 +131,7 @@ The menu locks itself again after 15 minutes without use or when it is closed.
 | Program | `%LOCALAPPDATA%\Programs\Retroverse Terminal` (per-user install) or `C:\Program Files\Retroverse Terminal` |
 | Configuration | `%APPDATA%\NestrisTerminal\config.toml` (`nestris-terminal.exe config-path`) |
 | Logs | `%APPDATA%\NestrisTerminal\logs\nestris-terminal.log` (rotating, JSON lines) |
+| Update downloads | `%APPDATA%\NestrisTerminal\updates\` (installer log `install-<version>.log`) |
 | Autostart | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` → `NestrisTerminal` |
 
 All keys are documented in [config.example.toml](../config.example.toml).

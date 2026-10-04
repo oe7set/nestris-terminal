@@ -2,13 +2,15 @@
 #
 #   RetroverseTerminal.exe  the kiosk (no console window); what autostart runs
 #   nestris-terminal.exe    console CLI: configure, autostart, set-pin, --headless
+#   esptool.exe             Espressif's esptool (GPL-2.0-or-later), a separate program
+#                           the updater runs to flash the reader; never imported
 #
 # Build with packaging/build.ps1 (it builds the UI first).
 # ruff: noqa
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 ROOT = Path(SPECPATH).parent
 SRC = ROOT / "src"
@@ -26,7 +28,7 @@ a = Analysis(
     datas=[(str(WEB), "nestris_terminal/web")],
     # uvicorn picks its loop/protocol implementations by name at runtime.
     hiddenimports=collect_submodules("uvicorn") + ["nestris_terminal.bridge.app"],
-    excludes=["tkinter", *DEV_TOOLS, "PySide6.Qt3DCore", "PySide6.QtQuick3D", "PySide6.QtCharts",
+    excludes=["tkinter", "esptool", *DEV_TOOLS, "PySide6.Qt3DCore", "PySide6.QtQuick3D", "PySide6.QtCharts",
               "PySide6.QtDataVisualization", "PySide6.QtMultimedia", "PySide6.QtPdf",
               "PySide6.QtBluetooth", "PySide6.QtSensors"],
     noarchive=False,
@@ -58,6 +60,20 @@ def keep(entry):
     return True
 
 
+# esptool: its own analysis and executable. It loads its stub flashers (JSON)
+# and chip targets at runtime; its license file ships next to it.
+import esptool as _esptool
+
+SITE = Path(_esptool.__file__).parent.parent
+ESPTOOL_LICENSE = next(SITE.glob("esptool-*.dist-info/licenses/LICENSE"))
+e = Analysis(
+    [str(ROOT / "packaging" / "esptool_main.py")],
+    datas=[*collect_data_files("esptool"), (str(ESPTOOL_LICENSE), "licenses/esptool")],
+    hiddenimports=collect_submodules("esptool"),
+    excludes=["tkinter", "PySide6", *DEV_TOOLS],
+    noarchive=False,
+)
+
 a.binaries = [e for e in a.binaries if keep(e)]
 a.datas = [e for e in a.datas if keep(e)]
 pyz = PYZ(a.pure)
@@ -77,4 +93,10 @@ cli = EXE(
     console=True,
     icon=icon,
 )
-COLLECT(kiosk, cli, a.binaries, a.datas, name="RetroverseTerminal")
+esptool_exe = EXE(
+    PYZ(e.pure), e.scripts, [],
+    exclude_binaries=True,
+    name="esptool",
+    console=True,
+)
+COLLECT(kiosk, cli, esptool_exe, a.binaries, a.datas, e.binaries, e.datas, name="RetroverseTerminal")

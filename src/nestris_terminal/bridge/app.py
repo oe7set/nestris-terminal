@@ -18,7 +18,7 @@ import secrets
 import time
 from importlib import resources
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -32,6 +32,7 @@ from nestris_terminal.logging_setup import ring_buffer
 from nestris_terminal.rfid import protocol
 from nestris_terminal.rfid.card import CardWriteError, ReaderCommandError
 from nestris_terminal.rfid.driver import FakeDriver, list_ports
+from nestris_terminal.updates.github import UpdateError
 
 if TYPE_CHECKING:
     from nestris_terminal.runtime import Runtime
@@ -101,6 +102,18 @@ class ReaderConfigIn(BaseModel):
     lang: str | None = Field(default=None, pattern=r"^(de|en)$")
     brightness: int | None = Field(default=None, ge=0, le=255)
     flip: bool | None = None
+
+
+class UpdateInstallIn(BaseModel):
+    target: Literal["app", "reader"]
+    version: str = Field(min_length=1, max_length=40)
+    # reader only: "factory" for readers still on the v1 sketch (resets reader settings)
+    mode: Literal["app", "factory"] = "app"
+
+
+class UpdateSettingsIn(BaseModel):
+    enabled: bool | None = None
+    channel: Literal["stable", "beta"] | None = None
 
 
 class FakeCardIn(BaseModel):
@@ -349,6 +362,71 @@ async def fake_card(body: FakeCardIn, request: Request, _: AdminDep) -> dict[str
     else:
         driver.remove()
     return {"ok": True}
+
+
+def _update_error(exc: UpdateError) -> HTTPException:
+    status = 409 if exc.code in ("busy", "no_reader", "fake_reader", "dev") else 400
+    if exc.code in ("flash_failed", "verify_failed", "failed"):
+        status = 502
+    return HTTPException(status, {"code": exc.code, "message": exc.message})
+
+
+@local.get("/admin/updates")
+async def updates_state(request: Request, _: AdminDep) -> dict[str, Any]:
+    return rt(request).updates.state()
+
+
+@local.post("/admin/updates/check")
+async def updates_check(request: Request, _: AdminDep) -> dict[str, Any]:
+    return await rt(request).updates.check()
+
+
+@local.get("/admin/updates/releases")
+async def updates_releases(
+    request: Request, _: AdminDep, target: Literal["app", "reader"] = "app"
+) -> list[dict[str, Any]]:
+    service = rt(request).updates
+    if not service.targets[target].releases:
+        await service.check()
+    return service.release_list(target)
+
+
+@local.post("/admin/updates/install")
+async def updates_install(body: UpdateInstallIn, request: Request, _: AdminDep) -> dict[str, Any]:
+    service = rt(request).updates
+    if service.status in ("downloading", "verifying", "flashing", "waiting", "installing"):
+        raise _update_error(UpdateError("busy", "an update is already in progress"))
+    # Flashing takes a minute: run in the background, the UI polls the state.
+    task = asyncio.get_running_loop().create_task(
+        service.install(body.target, body.version, mode=body.mode)
+    )
+    _background.add(task)
+
+    def done(t: asyncio.Task[Any]) -> None:
+        _background.discard(t)
+        if not t.cancelled():
+            t.exception()  # failures are in service.state() (status "error")
+
+    task.add_done_callback(done)
+    await asyncio.sleep(0.2)  # quick failures (unknown version, no reader) answer directly
+    if task.done() and isinstance(task.exception(), UpdateError):
+        raise _update_error(task.exception())  # type: ignore[arg-type]
+    return service.state()
+
+
+@local.put("/admin/updates/settings")
+async def updates_settings(body: UpdateSettingsIn, request: Request, _: AdminDep) -> dict[str, Any]:
+    runtime = rt(request)
+    data = runtime.settings.model_dump(mode="python")
+    for key in ("enabled", "channel"):
+        value = getattr(body, key)
+        if value is not None:
+            data["updates"][key] = value
+    new = type(runtime.settings).model_validate(data)
+    save_settings(new)
+    runtime.settings = new
+    runtime.updates.apply_settings(new)
+    return runtime.updates.state()
 
 
 @local.post("/admin/quit")

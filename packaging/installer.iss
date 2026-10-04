@@ -5,6 +5,8 @@
 ;   %APPDATA%\NestrisTerminal\config.toml (via "nestris-terminal.exe configure")
 ; - optional: start the kiosk when this Windows user signs in (HKCU Run key)
 ; - stops a running kiosk before updating / uninstalling
+; - /update=1 (set by the terminal's updater): silent update, then the kiosk
+;   starts again by itself
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -75,6 +77,7 @@ Filename: "{app}\{#CliExe}"; Parameters: "{code:ConfigureParams}"; Flags: runhid
 Filename: "{app}\{#CliExe}"; Parameters: "autostart on"; Flags: runhidden waituntilterminated; Tasks: autostart
 Filename: "{app}\{#CliExe}"; Parameters: "autostart off"; Flags: runhidden waituntilterminated; Tasks: not autostart
 Filename: "{app}\{#KioskExe}"; Description: "{cm:LaunchNow}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#KioskExe}"; Flags: nowait runasoriginaluser; Check: IsUpdate
 
 [UninstallRun]
 Filename: "{app}\{#CliExe}"; Parameters: "autostart off"; Flags: runhidden waituntilterminated; RunOnceId: "AutostartOff"
@@ -94,6 +97,12 @@ end;
 procedure RegisterPreviousData(PreviousDataKey: Integer);
 begin
   SetPreviousData(PreviousDataKey, 'HostUrl', Trim(HostPage.Values[0]));
+end;
+
+function IsUpdate: Boolean;
+begin
+  { Set by the terminal's updater (nestris_terminal/updates/service.py). }
+  Result := ExpandConstant('{param:update|0}') = '1';
 end;
 
 function HasConnectionInput: Boolean;

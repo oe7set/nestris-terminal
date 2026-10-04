@@ -30,3 +30,13 @@ port = 7991
 [log]
 level = "INFO"
 to_file = true
+
+[updates]
+# Hidden menu -> Updates. Checks GitHub releases; installing is always a tap.
+enabled = true            # check automatically (1 min after start, then every check_interval_h)
+channel = "stable"        # "beta" also offers pre-releases
+owner = "oe7set"
+app_repo = "nestris-terminal"
+reader_repo = "nestris-rfid-reader"
+token = ""                # optional GitHub token (rate limit on shared IPs)
+check_interval_h = 24

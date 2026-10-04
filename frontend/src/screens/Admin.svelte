@@ -1,8 +1,9 @@
 <script lang="ts">
-  // Hidden admin menu (5 taps on the logo): PIN, settings, reader Wi-Fi, debug.
+  // Hidden admin menu (5 taps on the logo): PIN, settings, reader, updates, debug.
   import { onMount } from "svelte";
   import NumPad from "../components/NumPad.svelte";
   import TextField from "../components/TextField.svelte";
+  import UpdatesPanel from "../components/UpdatesPanel.svelte";
   import { api, ApiError, setAdminToken } from "../lib/api";
   import { bridge } from "../lib/bridge.svelte";
   import { flow } from "../lib/flow.svelte";
@@ -36,7 +37,7 @@
   let unlocked = $state(false);
   let pin = $state("");
   let pinError = $state(false);
-  let tab = $state<"settings" | "reader" | "debug">("settings");
+  let tab = $state<"settings" | "reader" | "updates" | "debug">("settings");
   let message = $state<{ ok: boolean; text: string } | null>(null);
 
   // settings
@@ -283,6 +284,7 @@
       <div class="tabs">
         <button class:on={tab === "settings"} onclick={() => (tab = "settings")}>{t("admin.settings")}</button>
         <button class:on={tab === "reader"} onclick={() => (tab = "reader")}>{t("admin.reader_tab")}</button>
+        <button class:on={tab === "updates"} onclick={() => (tab = "updates")}>{t("admin.updates")}</button>
         <button class:on={tab === "debug"} onclick={() => (tab = "debug")}>{t("admin.debug")}</button>
       </div>
       <span class="spacer"></span>
@@ -369,6 +371,8 @@
           <p class="muted small">{t("admin.reader_hint")}</p>
           <button class="primary big" disabled={!reader?.ready} onclick={saveReader}>{t("admin.reader_save")}</button>
         </div>
+      {:else if tab === "updates"}
+        <UpdatesPanel onError={fail} />
       {:else if tab === "debug"}
         <div class="debug">
           <div class="panel">
