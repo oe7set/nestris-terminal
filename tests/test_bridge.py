@@ -23,6 +23,7 @@ class StubHost:
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, Any]] = []
         self.token_ok = True
+        self.reader_fw: str | None = None
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content) if request.content else None
@@ -30,6 +31,8 @@ class StubHost:
         if not self.token_ok:
             return httpx.Response(401, json={"detail": "invalid token"})
         assert request.headers["authorization"] == "Bearer nltm_test"
+        assert request.headers["x-terminal-version"]
+        self.reader_fw = request.headers.get("x-reader-firmware")
         path = request.url.path.removeprefix("/api/terminal/v1")
         if path == "/ping":
             return httpx.Response(
@@ -124,13 +127,14 @@ async def test_card_write(setup: tuple[Runtime, httpx.AsyncClient, StubHost]) ->
 async def test_profile_greets_on_the_reader(
     setup: tuple[Runtime, httpx.AsyncClient, StubHost],
 ) -> None:
-    runtime, client, _ = setup
+    runtime, client, stub = setup
     await until(lambda: runtime.cards.ready)
     driver = runtime.cards.driver
     assert isinstance(driver, FakeDriver)
     driver.place("04AA0001", "Erv")
     await until(lambda: runtime.cards.card)
     assert (await client.get("/api/players/7")).status_code == 200
+    assert stub.reader_fw == "0.0.0-fake"  # for NestrisLTM's device overview
     await until(lambda: driver.shown)
     assert driver.shown == ["Erv", "Bestwert 159.867"]
 

@@ -43,7 +43,7 @@ class Runtime:
         self.settings = settings
         self.started_at = datetime.now(UTC)
         self.events = Broadcaster()
-        self.host = HostClient(settings.host, transport=host_transport)
+        self.host = HostClient(settings.host, transport=host_transport, reader_fw=self._reader_fw)
         self.cards = self._make_cards(settings)
         self.updates = UpdateService(
             settings, _ReaderAccess(self), request_quit=lambda: self.request_shutdown(quit_app=True)
@@ -56,6 +56,10 @@ class Runtime:
         self.quit_requested = False
 
     # ------------------------------------------------------------ lifecycle
+
+    def _reader_fw(self) -> str | None:
+        hello = self.cards.hello if hasattr(self, "cards") else None
+        return hello.fw if hello else None
 
     def _make_cards(self, settings: Settings) -> CardTracker:
         cards = CardTracker(make_driver(settings))
@@ -88,7 +92,7 @@ class Runtime:
         await self.cards.stop()
         await self.host.close()
         self.settings = settings
-        self.host = HostClient(settings.host)
+        self.host = HostClient(settings.host, reader_fw=self._reader_fw)
         self.cards = self._make_cards(settings)
         self.cards.start()
         self.updates.apply_settings(settings)

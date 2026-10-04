@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 import structlog
 
+from nestris_terminal import __version__
 from nestris_terminal.config import HostSettings
 
 log = structlog.get_logger(__name__)
@@ -23,19 +25,33 @@ class HostError(RuntimeError):
 
 class HostClient:
     def __init__(
-        self, settings: HostSettings, transport: httpx.AsyncBaseTransport | None = None
+        self,
+        settings: HostSettings,
+        transport: httpx.AsyncBaseTransport | None = None,
+        reader_fw: Callable[[], str | None] = lambda: None,
     ) -> None:
         self.settings = settings
+        self._reader_fw = reader_fw
         self._client = httpx.AsyncClient(
             base_url=settings.url + PREFIX,
-            headers={"Authorization": f"Bearer {settings.token.get_secret_value()}"},
+            headers={
+                "Authorization": f"Bearer {settings.token.get_secret_value()}",
+                # NestrisLTM's device overview (Geräte) shows them.
+                "X-Terminal-Version": __version__,
+            },
             timeout=settings.timeout_s,
             transport=transport,
+            event_hooks={"request": [self._add_reader_header]},
         )
         self.reachable: bool | None = None
         self.last_error: str | None = None
         self.last_ok: datetime | None = None
         self.server: dict[str, Any] | None = None
+
+    async def _add_reader_header(self, request: httpx.Request) -> None:
+        fw = self._reader_fw()
+        if fw:
+            request.headers["X-Reader-Firmware"] = fw
 
     async def close(self) -> None:
         await self._client.aclose()
