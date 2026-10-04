@@ -395,7 +395,7 @@ wheels = [
 
 [[package]]
 name = "nestris-terminal"
-version = "0.1.0"
+version = "0.2.0b1"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
