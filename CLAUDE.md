@@ -41,6 +41,9 @@ run that app (or `uv run nestris-ltm --headless` there) to develop end to end.
 - Code comments, docstrings and docs in **English**; the UI is German first,
   English switchable (strings in `frontend/src/lib/i18n.svelte.ts`).
 - **Commit messages never mention Claude** (no Co-Authored-By trailer).
+- License: Apache-2.0 (`LICENSE`), attribution and third-party material in `NOTICE`.
+  New third-party assets (fonts, icons, copied code) get an entry there and keep
+  their own license file next to them; LICENSE and NOTICE ship with every build.
 - Touch only: no screen may need a physical keyboard. Text input uses the
   built-in on-screen keyboard; numbers use the on-screen number pad. Touch
   targets are at least 56 px.

@@ -39,3 +39,8 @@ cd frontend; pnpm install; pnpm dev     # UI with hot reload on :5175 (proxies t
 
 Without hardware set `rfid.driver = "fake"`; the debug menu can then place
 and remove simulated cards.
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Copyright 2026 Erwin Spitaler (OE7SET) – Retroverse.
