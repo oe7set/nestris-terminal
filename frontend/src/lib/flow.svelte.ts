@@ -36,6 +36,7 @@ class Flow {
 
   start(): void {
     addEventListener("pointerdown", () => this.touch(), { capture: true });
+    addEventListener("keydown", () => this.touch(), { capture: true });
     bridge.on((e) => {
       if (e.type !== "card") return;
       if (e.state === "present") void this.cardPresent({ uid: e.uid as string, name: (e.name as string) ?? null, format: e.format as string });

@@ -1,7 +1,9 @@
 <script lang="ts">
   // A text field for the on-screen keyboard: tapping it makes it the keyboard target.
-  // It is not a real <input>, so the OS touch keyboard never pops up.
-  import { input, type KeyboardLayout } from "../lib/input.svelte";
+  // It is not a real <input>, so the OS touch keyboard never pops up; a
+  // physical keyboard types into it too (App.svelte -> input.handleKey).
+  import { onMount } from "svelte";
+  import { input, type FieldTarget, type KeyboardLayout } from "../lib/input.svelte";
 
   interface Props {
     id: string;
@@ -32,20 +34,33 @@
 
   const focused = $derived(input.target?.id === id);
 
+  // One target for the on-screen and a physical keyboard; getters, so prop
+  // changes (e.g. a new onEnter) are seen.
+  const target: FieldTarget = {
+    get id() {
+      return id;
+    },
+    get: () => value,
+    set: (v) => (value = v),
+    get layout() {
+      return layout;
+    },
+    get maxLength() {
+      return maxLength;
+    },
+    get onEnter() {
+      return onEnter;
+    },
+  };
+
   function focus(): void {
-    input.focus({
-      id,
-      get: () => value,
-      set: (v) => (value = v),
-      layout,
-      maxLength,
-      onEnter,
-    });
+    input.focus(target);
   }
 
-  $effect(() => {
+  onMount(() => {
+    const unregister = input.register(target);  // Tab order = order on screen
     if (autofocus) focus();
-    return () => input.blur(id);
+    return unregister;
   });
 
   const shown = $derived(secret ? "•".repeat(value.length) : value);

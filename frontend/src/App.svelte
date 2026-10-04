@@ -18,11 +18,24 @@
     flow.start();
   });
 
+  // A physical keyboard, if one is plugged in: types into the field the
+  // on-screen keyboard is attached to (which stays visible).
+  function onKeydown(e: KeyboardEvent): void {
+    if (input.handleKey(e)) e.preventDefault();
+  }
+
+  function onPaste(e: ClipboardEvent): void {
+    const text = e.clipboardData?.getData("text") ?? "";
+    if (text && input.handlePaste(text)) e.preventDefault();
+  }
+
   $effect(() => {
     document.body.style.cursor = bridge.kiosk.hide_cursor ? "none" : "";
     document.documentElement.lang = bridge.kiosk.lang;
   });
 </script>
+
+<svelte:window onkeydown={onKeydown} onpaste={onPaste} />
 
 <div class="app" class:kb={input.target !== null}>
   <StatusBar />

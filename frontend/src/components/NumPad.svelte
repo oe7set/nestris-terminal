@@ -1,5 +1,6 @@
 <script lang="ts">
   // Number pad for PINs, scores and levels.
+  import { input } from "../lib/input.svelte";
   interface Props {
     value: string;
     maxLength?: number;
@@ -13,7 +14,21 @@
     if (value.length >= maxLength) return;
     value = value === "0" ? d : value + d;
   }
+
+  // Digits, Backspace and Enter from a physical keyboard (incl. the numeric
+  // block), unless a text field has the keyboard.
+  function onKeydown(e: KeyboardEvent): void {
+    if (input.target !== null || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (/^[0-9]$/.test(e.key)) press(e.key);
+    else if (e.key === "Backspace") value = value.slice(0, -1);
+    else if (e.key === "Delete" || e.key === "Escape") value = "";
+    else if (e.key === "Enter" && onEnter && !enterDisabled) onEnter();
+    else return;
+    e.preventDefault();
+  }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <div class="pad">
   {#each ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as d (d)}
