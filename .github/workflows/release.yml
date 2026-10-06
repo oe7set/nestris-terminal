@@ -95,7 +95,8 @@ jobs:
           body_path: dist/RELEASE_NOTES.md
           name: Retroverse Terminal ${{ steps.version.outputs.version }}
           prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
-          generate_release_notes: true
+          # A stable version is the release the updaters and the GitHub page show.
+          make_latest: ${{ steps.version.outputs.prerelease == 'true' && 'false' || 'true' }}
           files: |
             dist/RetroverseTerminal-Setup-*.exe
             dist/RetroverseTerminal-*-portable.zip
