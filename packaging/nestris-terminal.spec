@@ -83,19 +83,23 @@ e = Analysis(
     noarchive=False,
 )
 
-a_binaries_all = list(a.binaries)
+def basename(dest):
+    return dest.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+# Names of the Qt files dropped on purpose (for drop_dependents below).
+dropped_by_keep = {basename(e[0]) for e in a.binaries if not keep(e)}
 a.binaries = [e for e in a.binaries if keep(e)]
 a.datas = [e for e in a.datas if keep(e)]
 
 
-def drop_dependents(binaries):
+def drop_dependents(binaries, dropped):
     """Linux: also drop every bundled library or plugin (e.g. PySide6/Qt3DCore.abi3.so,
     a QML or multimedia plugin) that links a library dropped above; it could
     never load. Windows keeps such files too, but nothing checks them there."""
     import subprocess
 
-    kept = {e[0].replace("\\", "/").rsplit("/", 1)[-1] for e in binaries}
-    dropped = {e[0].replace("\\", "/").rsplit("/", 1)[-1] for e in a_binaries_all} - kept
+    dropped = set(dropped)
     needs = {}
     for dest, src, _kind in binaries:
         out = subprocess.run(["objdump", "-p", src], capture_output=True, text=True).stdout
@@ -104,12 +108,21 @@ def drop_dependents(binaries):
         gone = {e[0] for e in binaries if needs.get(e[0], set()) & dropped}
         if not gone:
             return binaries
-        dropped |= {d.replace("\\", "/").rsplit("/", 1)[-1] for d in gone}
+        dropped |= {basename(d) for d in gone}
         binaries = [e for e in binaries if e[0] not in gone]
 
 
+def from_system(entry):
+    """A library PyInstaller copied from the build machine's /lib or /usr/lib
+    (libX11, libxcb-*, libstdc++, libnss3 ...). Bundled, Debian 12 copies
+    clash with Debian 13's Mesa (GLX fails); the package depends on them
+    instead (debian/control.in), so every PC uses its own matching versions."""
+    src = str(entry[1])
+    return src.startswith(("/lib/", "/lib64/", "/usr/lib/", "/usr/lib64/"))
+
+
 if sys.platform.startswith("linux"):
-    a.binaries = drop_dependents(a.binaries)
+    a.binaries = drop_dependents([e for e in a.binaries if not from_system(e)], dropped_by_keep)
 pyz = PYZ(a.pure)
 
 # The .ico is a Windows resource; Linux uses the PNG from the .desktop file.

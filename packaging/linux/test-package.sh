@@ -14,7 +14,9 @@ result_has() { grep -q "$1" "$UPD/result" || { cat "$UPD/result"; fail "result l
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq "./$DEB" curl procps > /tmp/apt.log 2>&1 || { tail -n 30 /tmp/apt.log; fail "install"; }
+# xvfb: a virtual X server, so the kiosk runs on the real xcb platform plugin
+# (as under XFCE); mesa renders without a GPU.
+apt-get install -y -qq "./$DEB" curl procps xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl-mesa0 > /tmp/apt.log 2>&1 || { tail -n 30 /tmp/apt.log; fail "install"; }
 
 echo "== files, units, group"
 test -x $APP/RetroverseTerminal || fail "kiosk binary missing"
@@ -43,10 +45,12 @@ for lib in $missing; do
 done
 [ -z "$absent" ] || fail "system libraries missing (add them to debian/control):$absent"
 
-echo "== kiosk starts (offscreen, simulated reader)"
+echo "== kiosk starts (virtual X display, simulated reader)"
 useradd -m -G nestris-terminal,dialout kiosk
-runuser -u kiosk -- env HOME=/home/kiosk QT_QPA_PLATFORM=offscreen QTWEBENGINE_DISABLE_SANDBOX=1 \
-    NESTRIS_TERMINAL__RFID__DRIVER=fake $APP/RetroverseTerminal --windowed > /tmp/kiosk.log 2>&1 &
+# The Chromium sandbox needs user namespaces, which containers usually lack.
+runuser -u kiosk -- env HOME=/home/kiosk QTWEBENGINE_DISABLE_SANDBOX=1 \
+    NESTRIS_TERMINAL__RFID__DRIVER=fake xvfb-run -a -s "-screen 0 1280x800x24" \
+    $APP/RetroverseTerminal --windowed > /tmp/kiosk.log 2>&1 &
 KIOSK=$!
 ok=""
 for _ in $(seq 1 40); do
@@ -58,7 +62,8 @@ sleep 5
 kill -0 $KIOSK 2>/dev/null || { tail -n 40 /tmp/kiosk.log; fail "kiosk exited"; }
 [ -n "$ok" ] || { tail -n 40 /tmp/kiosk.log; fail "bridge did not serve the UI"; }
 pgrep -f QtWebEngineProcess > /dev/null || { tail -n 40 /tmp/kiosk.log; fail "no QtWebEngineProcess"; }
-kill $KIOSK; wait $KIOSK 2>/dev/null || true
+pkill -f "$APP/RetroverseTerminal" || true
+wait $KIOSK 2>/dev/null || true
 runuser -u kiosk -- env HOME=/home/kiosk $CLI autostart on
 grep -q "Exec=$APP/RetroverseTerminal" /home/kiosk/.config/autostart/retroverse-terminal.desktop \
     || fail "autostart entry wrong"

@@ -6,8 +6,8 @@ Installed-Size: @SIZE@
 Section: misc
 Priority: optional
 Homepage: https://github.com/oe7set/nestris-terminal
-Depends: libc6 (>= 2.36), passwd, init-system-helpers, libxcb-cursor0, libxkbcommon0, libxkbcommon-x11-0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxcb-xinerama0, libxcb-xinput0, libxcb-xkb1, libxcb-shm0, libxcb-sync1, libxcb-xfixes0, libx11-xcb1, libegl1, libgl1, libopengl0, libfontconfig1, libfreetype6, libdbus-1-3, libglib2.0-0t64 | libglib2.0-0, libnss3, libnspr4, libxcomposite1, libxdamage1, libxrandr2, libxtst6, libxshmfence1, libxkbfile1, libgbm1, libdrm2, libwayland-client0, libwayland-cursor0, libwayland-egl1, libasound2t64 | libasound2, libcups2t64 | libcups2
-Recommends: network-manager
+Depends: libc6 (>= 2.36), libstdc++6, libgcc-s1, zlib1g, libexpat1, passwd, init-system-helpers, libx11-6, libxcb1, libxcb-glx0, libxcb-render0, libxcb-util1, libxcb-cursor0, libxkbcommon0, libxkbcommon-x11-0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxcb-xinerama0, libxcb-xinput0, libxcb-xkb1, libxcb-shm0, libxcb-sync1, libxcb-xfixes0, libx11-xcb1, libegl1, libgl1, libopengl0, libfontconfig1, libfreetype6, libdbus-1-3, libglib2.0-0t64 | libglib2.0-0, libnss3, libnspr4, libxcomposite1, libxdamage1, libxrandr2, libxtst6, libxshmfence1, libxkbfile1, libgbm1, libdrm2, libwayland-client0, libwayland-cursor0, libwayland-egl1, libasound2t64 | libasound2, libcups2t64 | libcups2
+Recommends: network-manager, libgl1-mesa-dri, libglx-mesa0, libegl-mesa0
 Description: Retroverse Terminal - player terminal of the Retroverse Tetris tournament
  Touch kiosk for player registration, statistics, replays and the highscore,
  with a USB RFID card reader (nestris-rfid-reader, protocol v2). Client of
