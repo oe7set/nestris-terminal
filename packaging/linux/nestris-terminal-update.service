@@ -1,0 +1,8 @@
+[Unit]
+Description=Install a verified Retroverse Terminal update
+Documentation=https://github.com/oe7set/nestris-terminal/blob/main/docs/DEBIAN.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/nestris-terminal/update-helper
+TimeoutStartSec=600

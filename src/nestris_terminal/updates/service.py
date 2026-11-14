@@ -4,9 +4,14 @@ Plan: ``nestris-ltm/docs/UPDATES.md``. Two targets, checked by themselves
 (1 minute after start, then every ``updates.check_interval_h``) and
 installed only by a click in the hidden menu:
 
-- ``app``: ``RetroverseTerminal-Setup-<v>.exe`` from ``oe7set/nestris-terminal``,
+- ``app``: from ``oe7set/nestris-terminal``. Windows: ``RetroverseTerminal-Setup-<v>.exe``,
   started with ``/VERYSILENT /update=1``; the kiosk quits and the installer
-  starts it again.
+  starts it again. Debian: ``nestris-terminal_<v>_<arch>.deb``, handed to the
+  root helper of the package (``packaging/linux/update-helper``, started by
+  the path unit ``nestris-terminal-update.path``): the terminal copies the
+  package and the signed checksums into ``/var/lib/nestris-terminal/updates``
+  and writes ``request``; the helper verifies again, runs ``apt-get install``
+  and writes ``result``; on success the kiosk restarts itself.
 - ``reader``: the firmware from ``oe7set/nestris-rfid-reader``. The signed
   release manifest names the image and its flash offset; esptool writes the
   ``app`` image (keeps the reader's settings). A reader still on the v1
@@ -24,7 +29,9 @@ import hashlib
 import io
 import json
 import os
+import platform as platform_mod
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -56,6 +63,12 @@ HELLO_AFTER_FLASH_S = 20.0
 FLASH_BAUD = 460800
 
 APP_PREFIX, APP_SUFFIX = "RetroverseTerminal-Setup-", ".exe"
+DEB_PREFIX = "nestris-terminal_"
+DEB_ARCH = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
+# Installed by the Debian package (packaging/linux/).
+UPDATE_HELPER = Path("/usr/lib/nestris-terminal/update-helper")
+DEB_UPDATE_DIR = Path("/var/lib/nestris-terminal/updates")
+DEB_INSTALL_TIMEOUT_S = 600.0
 READER_PREFIX, MANIFEST_SUFFIX = "nestris-rfid-reader-", "-manifest.json"
 READER_CHIP = "esp32"
 APP_OFFSET_MIN = 0x10000
@@ -93,11 +106,20 @@ _PERCENT = re.compile(r"(\d{1,3}(?:\.\d+)?)\s?%")
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
+def app_asset(platform: str = sys.platform, machine: str | None = None) -> tuple[str, str]:
+    """Prefix and suffix of the app update for this platform (the version sits between)."""
+    if platform == "win32":
+        return APP_PREFIX, APP_SUFFIX
+    machine = (machine or platform_mod.machine()).lower()
+    return DEB_PREFIX, f"_{DEB_ARCH.get(machine, machine)}.deb"
+
+
 def esptool_command() -> list[str]:
     """esptool as a separate program (it is GPL-2.0-or-later; never imported):
-    ``esptool.exe`` next to the app when installed, the venv's module in development."""
+    ``esptool(.exe)`` next to the app when installed, the venv's module in development."""
     if getattr(sys, "frozen", False):
-        return [str(Path(sys.executable).with_name("esptool.exe"))]
+        name = "esptool.exe" if sys.platform == "win32" else "esptool"
+        return [str(Path(sys.executable).with_name(name))]
     return [sys.executable, "-m", "esptool"]
 
 
@@ -160,6 +182,13 @@ def start_installer(path: Path, args: str) -> None:
 # ---------------------------------------------------------------- service
 
 
+@dataclass(frozen=True)
+class SignedSums:
+    raw: bytes  # SHA256SUMS.txt as published
+    signature: str  # SHA256SUMS.txt.sig (base64)
+    entries: dict[str, str]  # file name -> sha256
+
+
 @dataclass
 class TargetInfo:
     name: Target
@@ -176,6 +205,7 @@ class UpdateService:
         reader: ReaderControl,
         *,
         request_quit: Callable[[], None] = lambda: None,
+        request_restart: Callable[[], None] = lambda: None,
         github_app: GitHubReleases | None = None,
         github_reader: GitHubReleases | None = None,
         flasher: Flasher = run_esptool,
@@ -183,12 +213,23 @@ class UpdateService:
         frozen: bool | None = None,
         current_version: str = __version__,
         public_keys: tuple[str, ...] = RELEASE_PUBLIC_KEYS,
+        platform: str = sys.platform,
+        machine: str | None = None,
+        deb_dir: Path = DEB_UPDATE_DIR,
+        update_helper: Path = UPDATE_HELPER,
+        poll_interval_s: float = 1.0,
     ) -> None:
         cfg = settings.updates
         token = cfg.token.get_secret_value()
         self.settings = settings
         self.reader = reader
         self.request_quit = request_quit
+        self.request_restart = request_restart
+        self.platform = platform
+        self.app_prefix, self.app_suffix = app_asset(platform, machine)
+        self.deb_dir = deb_dir
+        self.update_helper = update_helper
+        self.poll_interval_s = poll_interval_s
         self.targets: dict[Target, TargetInfo] = {
             "app": TargetInfo("app", github_app or GitHubReleases(cfg.owner, cfg.app_repo, token)),
             "reader": TargetInfo(
@@ -280,7 +321,8 @@ class UpdateService:
                 "update_available": self.app_update_available(),
                 "check_error": app.check_error,
                 "source": f"github.com/{cfg.owner}/{cfg.app_repo}",
-                "can_install": self.frozen and sys.platform == "win32",
+                "can_install": self.app_install_block() is None,
+                "install_hint": self.app_install_block(),
             },
             "reader": {
                 "current": view.fw,
@@ -355,16 +397,37 @@ class UpdateService:
                 raise UpdateError("failed", str(exc)) from exc
         return self.state()
 
-    async def _install_app(self, release: Release) -> None:
+    def app_install_block(self) -> str | None:
+        """Why this installation cannot update itself (None: it can)."""
         if not self.frozen:
-            raise UpdateError(
-                "dev", "app updates install only in the installed app (not a source checkout)"
+            return "app updates install only in the installed app (not a source checkout)"
+        if self.platform == "win32":
+            return None
+        if not self.platform.startswith("linux"):
+            return f"app updates are not supported on {self.platform}"
+        if not self.update_helper.exists():
+            return f"update helper {self.update_helper} missing (install the Debian package)"
+        if not os.access(self.deb_dir, os.W_OK | os.X_OK):
+            return (
+                f"no write access to {self.deb_dir}: add this user to the group "
+                "nestris-terminal and sign in again"
             )
-        name = release.find(APP_PREFIX, APP_SUFFIX)
+        return None
+
+    async def _install_app(self, release: Release) -> None:
+        block = self.app_install_block()
+        if block is not None:
+            raise UpdateError("dev" if not self.frozen else "unsupported", block)
+        name = release.find(self.app_prefix, self.app_suffix)
         if name is None:
-            raise UpdateError("not_installable", f"release {release.version} has no installer")
+            raise UpdateError(
+                "not_installable", f"release {release.version} has no package for this PC"
+            )
         sums = await self._signed_sums(release, "app")
-        installer = await self._download_checked(release, name, sums, "app")
+        installer = await self._download_checked(release, name, sums.entries, "app")
+        if self.platform != "win32":
+            await self._install_deb(release, installer, sums)
+            return
         self._set("installing", "app", str(release.version))
         logfile = self.settings.data_dir / "updates" / f"install-{release.version}.log"
         log.info("starting installer", version=str(release.version), installer=str(installer))
@@ -372,6 +435,51 @@ class UpdateService:
         self._launcher(installer, args)
         # Let the API answer first, then leave so the installer can replace the files.
         asyncio.get_running_loop().call_later(1.5, self.request_quit)
+
+    async def _install_deb(self, release: Release, package: Path, sums: SignedSums) -> None:
+        """Hand a verified package to the root helper and wait for its result."""
+        folder = self.deb_dir
+        for stale in ("request", "result"):
+            (folder / stale).unlink(missing_ok=True)
+        self._set("installing", "app", str(release.version))
+        await asyncio.to_thread(shutil.copyfile, package, folder / package.name)
+        (folder / SUMS_FILE).write_bytes(sums.raw)
+        (folder / (SUMS_FILE + ".sig")).write_bytes(f"{sums.signature}\n".encode("ascii"))
+        # Atomic: the path unit fires as soon as "request" exists.
+        tmp = folder / "request.tmp"
+        tmp.write_bytes(f"deb={package.name}\n".encode("ascii"))
+        tmp.replace(folder / "request")
+        log.info("app update handed to the helper", version=str(release.version))
+
+        result = await self._wait_deb_result()
+        await asyncio.to_thread(package.unlink, missing_ok=True)
+        if not result.get("ok"):
+            detail = str(result.get("detail") or "installation failed")
+            log.error("app update failed", detail=detail)
+            raise UpdateError("install_failed", detail)
+        log.info("app updated, restarting", version=result.get("version"))
+        self._set("done", "app", str(release.version))
+        asyncio.get_running_loop().call_later(1.5, self.request_restart)
+
+    async def _wait_deb_result(self) -> dict[str, Any]:
+        result = self.deb_dir / "result"
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + DEB_INSTALL_TIMEOUT_S
+        while loop.time() < deadline:
+            if result.is_file():
+                try:
+                    data = json.loads(result.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    data = {"ok": False, "detail": "unreadable result from the update helper"}
+                with contextlib.suppress(OSError):
+                    result.unlink()
+                return data if isinstance(data, dict) else {"ok": False}
+            await asyncio.sleep(self.poll_interval_s)
+        (self.deb_dir / "request").unlink(missing_ok=True)
+        raise UpdateError(
+            "install_timeout",
+            "no answer from the update helper (is nestris-terminal-update.path active?)",
+        )
 
     async def _install_reader(self, release: Release, mode: ReaderMode) -> None:
         view = self.reader.view()
@@ -383,9 +491,9 @@ class UpdateService:
         if manifest_name is None:
             raise UpdateError("not_installable", f"release {release.version} has no manifest")
         sums = await self._signed_sums(release, "reader")
-        manifest_path = await self._download_checked(release, manifest_name, sums, "reader")
+        manifest_path = await self._download_checked(release, manifest_name, sums.entries, "reader")
         image_name, offset = parse_manifest(manifest_path.read_text(encoding="utf-8"), mode)
-        image = await self._download_checked(release, image_name, sums, "reader")
+        image = await self._download_checked(release, image_name, sums.entries, "reader")
 
         port = view.port
         args = ["--chip", READER_CHIP, "--port", port, "--baud", str(FLASH_BAUD),
@@ -417,7 +525,7 @@ class UpdateService:
         with contextlib.suppress(OSError):
             image.unlink()
 
-    async def _signed_sums(self, release: Release, target: Target) -> dict[str, str]:
+    async def _signed_sums(self, release: Release, target: Target) -> SignedSums:
         github = self.targets[target].github
         self._set("downloading", target, SUMS_FILE, 0.0)
         sums_bytes = await github.fetch(release.assets[SUMS_FILE].url)
@@ -427,7 +535,9 @@ class UpdateService:
         self._set("verifying", target, "signature")
         if not verify_signature(sums_bytes, signature, self.public_keys):
             raise UpdateError("bad_signature", "SHA256SUMS.txt is not signed by the release key")
-        return parse_sums(sums_bytes.decode("utf-8", "replace"))
+        return SignedSums(
+            sums_bytes, signature.strip(), parse_sums(sums_bytes.decode("utf-8", "replace"))
+        )
 
     async def _download_checked(
         self, release: Release, name: str, sums: dict[str, str], target: Target
@@ -447,7 +557,7 @@ class UpdateService:
         self._set("downloading", target, name, 0.0)
         await self.targets[target].github.download(release.assets[name].url, dest, progress)
         self._set("verifying", target, "sha256")
-        digest = await asyncio.to_thread(_sha256, dest)
+        digest = await asyncio.to_thread(file_sha256, dest)
         if digest != expected:
             dest.unlink(missing_ok=True)
             raise UpdateError("bad_checksum", f"{name}: checksum mismatch")
@@ -473,7 +583,7 @@ def parse_manifest(text: str, mode: ReaderMode) -> tuple[str, int]:
     return name, offset
 
 
-def _sha256(path: Path) -> str:
+def file_sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):

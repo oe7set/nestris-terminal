@@ -1,0 +1,12 @@
+[Unit]
+Description=Watch for Retroverse Terminal update requests
+Documentation=https://github.com/oe7set/nestris-terminal/blob/main/docs/DEBIAN.md
+
+[Path]
+# Written by the kiosk (group nestris-terminal) after it downloaded and
+# verified a package; the root helper verifies again before installing.
+PathExists=/var/lib/nestris-terminal/updates/request
+Unit=nestris-terminal-update.service
+
+[Install]
+WantedBy=multi-user.target

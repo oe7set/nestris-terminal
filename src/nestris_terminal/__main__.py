@@ -7,6 +7,7 @@ nestris-terminal set-pin         set the admin PIN of the hidden menu
 nestris-terminal configure ...   set host URL / token / reader (used by the installer)
 nestris-terminal autostart on|off|status
 nestris-terminal config-path     print the config file location
+nestris-terminal verify-update DIR FILE   check FILE against DIR/SHA256SUMS.txt(.sig)
 """
 
 from __future__ import annotations
@@ -45,8 +46,15 @@ def _parser() -> argparse.ArgumentParser:
     conf.add_argument("--reader-port", help="serial port of the reader, '' = automatic")
     conf.add_argument("--driver", choices=["serial", "fake"], help="card reader driver")
     conf.add_argument("--lang", choices=["de", "en"], help="UI language")
-    auto = sub.add_parser("autostart", help="start the kiosk when this Windows user signs in")
+    auto = sub.add_parser("autostart", help="start the kiosk when this user signs in")
     auto.add_argument("state", choices=["on", "off", "status"])
+    verify = sub.add_parser(
+        "verify-update",
+        help="check a release file against the signed SHA256SUMS.txt next to it "
+        "(used by the Debian update helper)",
+    )
+    verify.add_argument("dir", type=Path, help="folder with SHA256SUMS.txt and SHA256SUMS.txt.sig")
+    verify.add_argument("file", help="file name inside that folder")
     return parser
 
 
@@ -74,11 +82,46 @@ def _autostart(args: argparse.Namespace) -> int:
     from nestris_terminal.shell import autostart
 
     if not autostart.is_supported():
-        print("Autostart is only supported on Windows.", file=sys.stderr)
+        print("Autostart is only supported on Windows and Linux.", file=sys.stderr)
         return 2
     if args.state != "status":
         autostart.set_enabled(args.state == "on")
     print("on" if autostart.is_enabled() else "off")
+    return 0
+
+
+def _verify_update(args: argparse.Namespace) -> int:
+    """Exit 0 only if the signature and the file's checksum are good."""
+    from nestris_terminal.updates.releases import parse_sums, verify_signature
+    from nestris_terminal.updates.service import file_sha256
+
+    folder: Path = args.dir
+    name: str = args.file
+    if "/" in name or "\\" in name or name.startswith("."):
+        print(f"bad file name {name!r}", file=sys.stderr)
+        return 2
+    try:
+        sums = (folder / "SHA256SUMS.txt").read_bytes()
+        signature = (folder / "SHA256SUMS.txt.sig").read_text(encoding="ascii", errors="replace")
+    except OSError as exc:
+        print(f"cannot read the checksums: {exc}", file=sys.stderr)
+        return 1
+    if not verify_signature(sums, signature):
+        print("SHA256SUMS.txt is not signed by the release key", file=sys.stderr)
+        return 1
+    expected = parse_sums(sums.decode("utf-8", "replace")).get(name)
+    if expected is None:
+        print(f"{name} is not in SHA256SUMS.txt", file=sys.stderr)
+        return 1
+    try:
+        digest = file_sha256(folder / name)
+    except OSError as exc:
+        print(f"cannot read {name}: {exc}", file=sys.stderr)
+        return 1
+    if digest != expected:
+        print(f"{name}: checksum mismatch", file=sys.stderr)
+        return 1
+    print(f"{name}: OK")
     return 0
 
 
@@ -87,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "config-path":
         print(args.config)
         return 0
+    if args.command == "verify-update":
+        return _verify_update(args)
 
     if args.command == "configure":
         return _configure(args)
@@ -109,7 +154,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.headless:
         from nestris_terminal.runtime import Runtime
 
-        asyncio.run(Runtime(settings).serve())
+        runtime = Runtime(settings)
+        asyncio.run(runtime.serve())
+        if runtime.restart_requested:
+            from nestris_terminal.restart import restart_process
+
+            restart_process()
         return 0
 
     from nestris_terminal.shell.kiosk import run_kiosk

@@ -5,9 +5,12 @@
 #   esptool.exe             Espressif's esptool (GPL-2.0-or-later), a separate program
 #                           the updater runs to flash the reader; never imported
 #
-# Build with packaging/build.ps1 (it builds the UI first).
+# On Linux the same three programs, without ".exe".
+# Build with packaging/build.ps1 (Windows) or packaging/linux/build-deb.sh
+# (Debian); both build the UI first.
 # ruff: noqa
 
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
@@ -49,6 +52,8 @@ KEEP_LOCALES = ("de.pak", "en-US.pak", "en-GB.pak")
 def keep(entry):
     dest = entry[0].replace("\\", "/")
     name = dest.rsplit("/", 1)[-1]
+    if name.startswith("libQt6"):  # Linux: libQt6Charts.so.6 = Qt6Charts.dll
+        name = name[3:]
     if "PySide6/qml/" in dest:
         return False
     if name.startswith(DROP):
@@ -78,7 +83,8 @@ a.binaries = [e for e in a.binaries if keep(e)]
 a.datas = [e for e in a.datas if keep(e)]
 pyz = PYZ(a.pure)
 
-icon = str(ROOT / "packaging" / "icon.ico")
+# The .ico is a Windows resource; Linux uses the PNG from the .desktop file.
+icon = str(ROOT / "packaging" / "icon.ico") if sys.platform == "win32" else None
 kiosk = EXE(
     pyz, a.scripts, [],
     exclude_binaries=True,

@@ -25,6 +25,8 @@ uv run nestris-terminal --headless     # bridge only; open http://127.0.0.1:7991
 cd frontend; pnpm install; pnpm build  # UI -> src/nestris_terminal/web (git-ignored)
 pnpm check; pnpm test; pnpm dev        # svelte-check, vitest, Vite dev server (proxies the bridge)
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1   # UI + PyInstaller (+ Inno Setup installer)
+bash packaging/linux/build-deb.sh          # Debian 12+: UI + PyInstaller -> dist/nestris-terminal_<v>_<arch>.deb
+bash packaging/linux/test-package.sh <deb> # as root in a throwaway debian:trixie container
 ```
 
 Packaging: `packaging/nestris-terminal.spec` builds one folder with two
@@ -34,6 +36,19 @@ and `nestris-terminal.exe` (console CLI: `configure`, `autostart`, `set-pin`,
 program for reader updates. Never import `esptool` in `src/`: the updater
 (`updates/service.py`) only runs it as a child process. `packaging/installer.iss` asks for host URL + token and calls
 `nestris-terminal.exe configure`. Operations guide: `docs/OPERATIONS.md`.
+
+Debian (`packaging/linux/`, guide `docs/DEBIAN.md`): the same spec builds
+`RetroverseTerminal`, `nestris-terminal` and `esptool` without `.exe`. The
+`.deb` installs them to `/opt/nestris-terminal` and is built in Debian 12
+(glibc) by `.github/workflows/deb.yml`. The kiosk runs in an XFCE session
+(XDG autostart, `shell/autostart.py`). App updates go through a root helper:
+the kiosk writes `/var/lib/nestris-terminal/updates/request`, the path unit
+`nestris-terminal-update.path` runs `update-helper`, which re-verifies with
+`nestris-terminal verify-update` and runs `apt-get install`; the kiosk then
+re-execs itself (`restart.py`). Shell scripts and units must keep LF line
+endings (`.gitattributes`). The Qt libraries of the package are the
+`Depends` in `debian/control.in`; `test-package.sh` fails on any missing
+one.
 
 The NestrisLTM side lives in `../nestris-ltm` (`src/nestris_ltm/api/routes_terminal.py`);
 run that app (or `uv run nestris-ltm --headless` there) to develop end to end.

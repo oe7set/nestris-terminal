@@ -1,10 +1,12 @@
 # Release: push a tag "v<version>" (the version in pyproject.toml), e.g.
 #   git tag v0.2.0 && git push origin v0.2.0
-# Builds the UI, the PyInstaller folder and the Inno Setup installer on Windows
-# signs SHA256SUMS.txt (secret RELEASE_SIGNING_KEY, see nestris-ltm/docs/UPDATES.md)
-# and publishes them as a GitHub release (tags with "-", e.g. v0.2.0-rc1,
-# become pre-releases). The NestrisLTM checkout works as in ci.yml; for a
-# reproducible release set NESTRIS_LTM_REF to a tag of NestrisLTM.
+# Builds on Windows (UI, PyInstaller folder, Inno Setup installer, portable
+# zip) and on Debian 12 (nestris-terminal_<v>_amd64.deb, tested in a clean
+# Debian 13), signs one SHA256SUMS.txt over all of them (secret
+# RELEASE_SIGNING_KEY, see nestris-ltm/docs/UPDATES.md) and publishes them as
+# a GitHub release (tags with "-", e.g. v0.2.0-rc1, become pre-releases). The
+# NestrisLTM checkout works as in ci.yml; for a reproducible release set
+# NESTRIS_LTM_REF to a tag of NestrisLTM.
 name: Release
 
 on:
@@ -19,11 +21,32 @@ on:
 permissions:
   contents: write
 
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
 jobs:
-  build:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Check tag matches pyproject version
+        id: version
+        run: |
+          version=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' pyproject.toml | head -n 1)
+          [ "v$version" = "$TAG" ] || { echo "tag $TAG does not match pyproject version $version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Pre-release: semver (1.2.0-beta.1) or PEP 440 (1.2.0b1, 1.2.0rc1).
+          if echo "$version" | grep -Eq -- '-|(a|b|rc)[0-9]+$'; then pre=true; else pre=false; fi
+          echo "prerelease=$pre" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: version
     runs-on: windows-latest
-    env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,17 +70,6 @@ jobs:
         with:
           node-version: 22
 
-      - name: Check tag matches pyproject version
-        id: version
-        shell: pwsh
-        run: |
-          $version = (Select-String -Path pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          if ("v$version" -ne $env:TAG) { throw "tag $env:TAG does not match pyproject version $version" }
-          "version=$version" >> $env:GITHUB_OUTPUT
-          # Pre-release: semver (1.2.0-beta.1) or PEP 440 (1.2.0b1, 1.2.0rc1).
-          $pre = $version -match '-|(a|b|rc)\d+$'
-          "prerelease=$($pre.ToString().ToLower())" >> $env:GITHUB_OUTPUT
-
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -71,15 +83,43 @@ jobs:
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 
-      - name: Package
+      - name: Portable zip
         shell: pwsh
         run: |
-          $v = "${{ steps.version.outputs.version }}"
+          $v = "${{ needs.version.outputs.version }}"
           Compress-Archive -Path dist\RetroverseTerminal -DestinationPath "dist\RetroverseTerminal-$v-portable.zip"
-          Get-ChildItem dist -File | Where-Object { $_.Extension -in ".exe", ".zip" } | ForEach-Object {
-            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
-          } | Set-Content -Encoding ascii dist\SHA256SUMS.txt
-          Get-Content dist\SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/RetroverseTerminal-Setup-*.exe
+            dist/RetroverseTerminal-*-portable.zip
+          if-no-files-found: error
+
+  # The .deb (built in Debian 12, tested in Debian 13): see deb.yml.
+  debian:
+    needs: version
+    uses: ./.github/workflows/deb.yml
+    with:
+      ref: ${{ github.event.inputs.tag || github.ref_name }}
+    secrets: inherit
+
+  release:
+    needs: [version, windows, debian]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum *.exe *.zip *.deb > SHA256SUMS.txt && cat SHA256SUMS.txt
 
       - name: Sign checksums
         env:
@@ -87,18 +127,19 @@ jobs:
         run: uv run --script .github/scripts/sign_release.py sign dist/SHA256SUMS.txt
 
       - name: Release notes from CHANGELOG.md
-        run: uv run --script .github/scripts/release_notes.py ${{ steps.version.outputs.version }} CHANGELOG.md dist/RELEASE_NOTES.md
+        run: uv run --script .github/scripts/release_notes.py ${{ needs.version.outputs.version }} CHANGELOG.md dist/RELEASE_NOTES.md
 
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
           body_path: dist/RELEASE_NOTES.md
-          name: Retroverse Terminal ${{ steps.version.outputs.version }}
-          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+          name: Retroverse Terminal ${{ needs.version.outputs.version }}
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           # A stable version is the release the updaters and the GitHub page show.
-          make_latest: ${{ steps.version.outputs.prerelease == 'true' && 'false' || 'true' }}
+          make_latest: ${{ needs.version.outputs.prerelease == 'true' && 'false' || 'true' }}
           files: |
             dist/RetroverseTerminal-Setup-*.exe
             dist/RetroverseTerminal-*-portable.zip
+            dist/nestris-terminal_*.deb
             dist/SHA256SUMS.txt
             dist/SHA256SUMS.txt.sig

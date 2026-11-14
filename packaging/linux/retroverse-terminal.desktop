@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Retroverse Terminal
+Comment=Retroverse player terminal (kiosk)
+Exec=/opt/nestris-terminal/RetroverseTerminal
+Icon=retroverse-terminal
+Terminal=false
+Categories=Game;

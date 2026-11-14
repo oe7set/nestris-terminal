@@ -1,4 +1,6 @@
-# Lint, type check and tests on every push and pull request.
+# Lint, type check and tests on every push and pull request (Windows and
+# Linux), plus the Debian package (deb.yml: built in Debian 12, installed
+# and exercised in Debian 13).
 #
 # The UI links the shared NES package from the NestrisLTM repository
 # (frontend/package.json: link:../../nestris-ltm/...), so the frontend job
@@ -34,6 +36,25 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run pytest -q
+
+  python-linux:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Qt runtime libraries (the kiosk test opens a QWebEngineView)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon0 libnss3 libfontconfig1 libdbus-1-3
+      - run: uv sync --locked
+      - run: uv run mypy
+      - run: uv run pytest -q
+
+  deb:
+    uses: ./.github/workflows/deb.yml
+    secrets: inherit
 
   frontend:
     runs-on: ubuntu-latest

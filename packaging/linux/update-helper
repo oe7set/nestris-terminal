@@ -1,0 +1,65 @@
+#!/bin/sh
+# Root half of the terminal updater (started by nestris-terminal-update.path).
+#
+# The kiosk (a desktop user in the group "nestris-terminal") downloads and
+# verifies a package, then writes /var/lib/nestris-terminal/updates/request
+# ("deb=<file>"). This helper copies the files into a root-only directory,
+# verifies them again with the installed (root-owned) binary - the kiosk's own
+# check is not trusted - and installs the package. The outcome goes to
+# .../updates/result; the kiosk waits for it and then restarts itself.
+# Same design as nestris-core/crates/nestris-station/packaging/update-helper.
+set -u
+
+SRC=/var/lib/nestris-terminal/updates
+WORK=/var/lib/nestris-terminal-update
+REQ="$SRC/request"
+CLI=${NESTRIS_TERMINAL_CLI:-/opt/nestris-terminal/nestris-terminal}
+
+result() { # ok version detail
+    detail=$(printf '%s' "$3" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)
+    printf '{"ok":%s,"version":"%s","detail":"%s"}\n' "$1" "$2" "$detail" > "$SRC/result.tmp"
+    chgrp nestris-terminal "$SRC/result.tmp" 2>/dev/null || true
+    chmod 0660 "$SRC/result.tmp"
+    mv "$SRC/result.tmp" "$SRC/result"
+}
+
+[ -f "$REQ" ] || exit 0
+DEB=$(sed -n 's/^deb=//p' "$REQ" | head -n 1)
+rm -f "$REQ"
+
+case "$DEB" in
+    */* | .*) result false "" "bad request"; exit 1 ;;
+    nestris-terminal_*.deb) ;;
+    *) result false "" "bad request"; exit 1 ;;
+esac
+
+rm -rf "$WORK"
+install -d -m 0700 "$WORK"
+if ! cp "$SRC/$DEB" "$SRC/SHA256SUMS.txt" "$SRC/SHA256SUMS.txt.sig" "$WORK/"; then
+    rm -f "$SRC/$DEB"
+    result false "" "update files missing"
+    exit 1
+fi
+rm -f "$SRC/$DEB"
+
+if ! out=$("$CLI" verify-update "$WORK" "$DEB" 2>&1); then
+    rm -rf "$WORK"
+    result false "" "verification failed: $out"
+    exit 1
+fi
+if [ "$(dpkg-deb -f "$WORK/$DEB" Package 2>/dev/null)" != "nestris-terminal" ]; then
+    rm -rf "$WORK"
+    result false "" "not a nestris-terminal package"
+    exit 1
+fi
+VERSION=$(dpkg-deb -f "$WORK/$DEB" Version)
+
+export DEBIAN_FRONTEND=noninteractive
+if apt-get install -y --allow-downgrades -o Dpkg::Options::=--force-confold \
+        "$WORK/$DEB" > "$WORK/apt.log" 2>&1; then
+    result true "$VERSION" "installed $VERSION"
+    rm -rf "$WORK"
+else
+    result false "$VERSION" "apt-get failed: $(tail -n 2 "$WORK/apt.log")"
+    exit 1
+fi

@@ -1,7 +1,9 @@
 # Operations guide: Retroverse Terminal
 
 How to set up, run and troubleshoot the player terminal on the touch PC at
-the event. For the design see [ARCHITECTURE.md](ARCHITECTURE.md).
+the event. For the design see [ARCHITECTURE.md](ARCHITECTURE.md). On a
+**Debian** PC install and set it up with [DEBIAN.md](DEBIAN.md); from the
+first start on, this guide applies to both.
 
 ## What you need
 
@@ -144,6 +146,7 @@ nestris-terminal.exe configure --host URL --token TOKEN [--reader-port COM5] [--
 nestris-terminal.exe autostart on|off|status
 nestris-terminal.exe set-pin          # set the hidden-menu PIN (asks for it)
 nestris-terminal.exe config-path
+nestris-terminal.exe verify-update DIR FILE   # FILE against the signed DIR/SHA256SUMS.txt (Debian update helper)
 nestris-terminal.exe --headless       # bridge only, UI at http://127.0.0.1:7991 in a browser
 RetroverseTerminal.exe [--windowed]   # kiosk
 ```

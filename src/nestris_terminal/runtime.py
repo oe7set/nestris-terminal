@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import platform
+import shutil
 import socket
 import subprocess
 import sys
@@ -46,7 +47,10 @@ class Runtime:
         self.host = HostClient(settings.host, transport=host_transport, reader_fw=self._reader_fw)
         self.cards = self._make_cards(settings)
         self.updates = UpdateService(
-            settings, _ReaderAccess(self), request_quit=lambda: self.request_shutdown(quit_app=True)
+            settings,
+            _ReaderAccess(self),
+            request_quit=lambda: self.request_shutdown(quit_app=True),
+            request_restart=lambda: self.request_shutdown(quit_app=True, restart=True),
         )
         self.loop: asyncio.AbstractEventLoop | None = None
         self._tasks: set[asyncio.Task[Any]] = set()
@@ -54,6 +58,8 @@ class Runtime:
         self._reader_connected: bool | None = None
         self._host_reachable: bool | None = None
         self.quit_requested = False
+        # After an app update (Debian): start the new binary once shut down.
+        self.restart_requested = False
 
     # ------------------------------------------------------------ lifecycle
 
@@ -124,9 +130,11 @@ class Runtime:
     def http_started(self) -> bool:
         return self._server is not None and self._server.started
 
-    def request_shutdown(self, *, quit_app: bool = False) -> None:
-        """Thread-safe. ``quit_app`` also closes the kiosk window."""
+    def request_shutdown(self, *, quit_app: bool = False, restart: bool = False) -> None:
+        """Thread-safe. ``quit_app`` also closes the kiosk window; ``restart``
+        starts the program again afterwards (:func:`nestris_terminal.restart.restart_process`)."""
         self.quit_requested = self.quit_requested or quit_app
+        self.restart_requested = self.restart_requested or restart
 
         def stop() -> None:
             if self._server is not None:
@@ -242,7 +250,7 @@ class _ReaderAccess:
 
 
 def network_info() -> dict[str, Any]:
-    """Addresses of this PC and, on Windows, the Wi-Fi connection."""
+    """Addresses of this PC and its Wi-Fi connection (netsh on Windows, nmcli on Linux)."""
     info: dict[str, Any] = {"addresses": [], "wifi": None}
     try:
         infos = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
@@ -275,4 +283,30 @@ def network_info() -> dict[str, Any]:
             info["wifi_query_ms"] = int((time.monotonic() - started) * 1000)
         except (OSError, subprocess.SubprocessError):
             pass
+    elif shutil.which("nmcli"):
+        try:
+            started = time.monotonic()
+            out = subprocess.run(
+                ["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            ).stdout
+            info["wifi"] = parse_nmcli_wifi(out)
+            info["wifi_query_ms"] = int((time.monotonic() - started) * 1000)
+        except (OSError, subprocess.SubprocessError):
+            pass
     return info
+
+
+def parse_nmcli_wifi(out: str) -> dict[str, Any] | None:
+    """The active Wi-Fi from ``nmcli -t -f ACTIVE,SSID,SIGNAL dev wifi``
+    (terse output escapes ``:`` in the SSID with a backslash)."""
+    for line in out.splitlines():
+        active, sep, rest = line.partition(":")
+        ssid, sep2, signal = rest.rpartition(":")
+        if sep and sep2 and active == "yes" and ssid:
+            ssid = ssid.replace(r"\:", ":")
+            return {"ssid": ssid, "signal": f"{signal}%", "state": "connected"}
+    return None

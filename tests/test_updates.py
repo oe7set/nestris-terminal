@@ -34,6 +34,7 @@ PUBLIC = base64.b64encode(
     KEY.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
 ).decode()
 INSTALLER = b"MZ fake installer" * 50
+DEB_PACKAGE = b"!<arch> fake debian package" * 50
 APP_IMAGE = b"\xe9 fake esp32 app image" * 40
 FACTORY_IMAGE = b"\xe9 fake factory image" * 80
 
@@ -80,7 +81,10 @@ class FakeGitHub:
         self._publish(
             "nestris-terminal",
             version,
-            {f"RetroverseTerminal-Setup-{version}.exe": INSTALLER},
+            {
+                f"RetroverseTerminal-Setup-{version}.exe": INSTALLER,
+                f"nestris-terminal_{version}_amd64.deb": DEB_PACKAGE,
+            },
             **kw,
         )
 
@@ -147,12 +151,12 @@ def gh() -> FakeGitHub:
 def make_service(
     tmp_path: Path, gh: FakeGitHub, reader: FakeReader | None = None, *,
     flash_result: Callable[[list[str]], int] | None = None, frozen: bool = True,
-    current: str = "0.2.0", channel: str = "stable",
+    current: str = "0.2.0", channel: str = "stable", **extra: Any,
 ) -> tuple[UpdateService, dict[str, Any]]:  # fmt: skip
     settings = load_settings(
         tmp_path / "none.toml", data_dir=tmp_path, updates={"channel": channel}
     )
-    calls: dict[str, Any] = {"launched": [], "flashed": [], "quit": 0}
+    calls: dict[str, Any] = {"launched": [], "flashed": [], "quit": 0, "restart": 0}
     reader = reader or FakeReader()
 
     def flasher(args: list[str], progress: Callable[[float], None]) -> tuple[int, str]:
@@ -169,11 +173,15 @@ def make_service(
     def quit_() -> None:
         calls["quit"] += 1
 
+    def restart() -> None:
+        calls["restart"] += 1
+
     transport = httpx.MockTransport(gh)
     service = UpdateService(
         settings,
         reader,
         request_quit=quit_,
+        request_restart=restart,
         github_app=GitHubReleases("oe7set", "nestris-terminal", transport=transport),
         github_reader=GitHubReleases("oe7set", "nestris-rfid-reader", transport=transport),
         flasher=flasher,
@@ -181,6 +189,7 @@ def make_service(
         frozen=frozen,
         current_version=current,
         public_keys=(PUBLIC,),
+        **{"platform": "win32", **extra},
     )
     return service, calls
 
@@ -438,3 +447,135 @@ def test_esptool_error_message() -> None:
     )
     assert esptool_error(boxed) == "Failed to connect to ESP32: No serial data received."
     assert esptool_error("a\nb\nc") == "b c"
+
+
+# ---------------------------------------------------------------- Debian package
+
+
+def test_app_asset_per_platform() -> None:
+    assert service_mod.app_asset("win32") == ("RetroverseTerminal-Setup-", ".exe")
+    assert service_mod.app_asset("linux", "x86_64") == ("nestris-terminal_", "_amd64.deb")
+    assert service_mod.app_asset("linux", "aarch64") == ("nestris-terminal_", "_arm64.deb")
+
+
+def deb_service(
+    tmp_path: Path, gh: FakeGitHub, **kw: Any
+) -> tuple[UpdateService, dict[str, Any], Path]:
+    helper = tmp_path / "update-helper"
+    helper.write_text("#!/bin/sh\n")
+    updates = tmp_path / "var-updates"
+    updates.mkdir()
+    service, calls = make_service(
+        tmp_path, gh, platform="linux", machine="x86_64", deb_dir=updates,
+        update_helper=helper, poll_interval_s=0.01, **kw,
+    )  # fmt: skip
+    return service, calls, updates
+
+
+async def fake_helper(updates: Path, result: dict[str, Any]) -> dict[str, str]:
+    """Acts like the root helper: waits for the request, answers with ``result``."""
+    import asyncio
+
+    while not (updates / "request").exists():  # noqa: ASYNC110
+        await asyncio.sleep(0.01)
+    request = (updates / "request").read_text()
+    seen = {p.name: p.read_bytes().decode("latin-1") for p in updates.iterdir()}
+    (updates / "request").unlink()
+    (updates / "result").write_text(json.dumps(result))
+    return {"request": request, **seen}
+
+
+async def test_install_deb_through_helper(tmp_path: Path, gh: FakeGitHub) -> None:
+    import asyncio
+
+    gh.add_app("0.3.0")
+    service, calls, updates = deb_service(tmp_path, gh)
+    assert service.state()["app"]["can_install"]
+    await service.check()
+    helper = asyncio.create_task(fake_helper(updates, {"ok": True, "version": "0.3.0"}))
+    await service.install("app", "0.3.0")
+    seen = await helper
+    assert seen["request"] == "deb=nestris-terminal_0.3.0_amd64.deb\n"
+    assert seen["nestris-terminal_0.3.0_amd64.deb"].encode("latin-1") == DEB_PACKAGE
+    assert "nestris-terminal_0.3.0_amd64.deb" in seen["SHA256SUMS.txt"]
+    assert verify_signature(seen["SHA256SUMS.txt"].encode(), seen["SHA256SUMS.txt.sig"], (PUBLIC,))
+    assert service.status == "done" and calls["launched"] == []
+    await asyncio.sleep(1.6)
+    assert calls["restart"] == 1 and calls["quit"] == 0
+    assert not (updates / "result").exists()
+
+
+async def test_install_deb_failure_is_reported(tmp_path: Path, gh: FakeGitHub) -> None:
+    import asyncio
+
+    gh.add_app("0.3.0")
+    service, calls, updates = deb_service(tmp_path, gh)
+    await service.check()
+    helper = asyncio.create_task(fake_helper(updates, {"ok": False, "detail": "apt-get failed: x"}))
+    with pytest.raises(UpdateError) as err:
+        await service.install("app", "0.3.0")
+    await helper
+    assert err.value.code == "install_failed" and "apt-get failed" in err.value.message
+    assert service.status == "error" and calls["restart"] == 0
+
+
+def test_deb_install_blocked_without_helper_or_group(tmp_path: Path, gh: FakeGitHub) -> None:
+    service, _, _ = deb_service(tmp_path, gh)
+    service.update_helper = tmp_path / "missing"
+    state = service.state()["app"]
+    assert not state["can_install"] and "Debian package" in state["install_hint"]
+    service.update_helper = tmp_path / "update-helper"
+    service.deb_dir = tmp_path / "does-not-exist"
+    assert "group nestris-terminal" in service.state()["app"]["install_hint"]
+    win, _ = make_service(tmp_path, gh)
+    assert win.state()["app"]["can_install"] and win.state()["app"]["install_hint"] is None
+
+
+def test_verify_update_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from nestris_terminal import __main__ as cli
+    from nestris_terminal.updates import releases
+
+    name = "nestris-terminal_0.3.0_amd64.deb"
+    (tmp_path / name).write_bytes(DEB_PACKAGE)
+    sums = f"{sha(DEB_PACKAGE)}  {name}\n".encode()
+    (tmp_path / "SHA256SUMS.txt").write_bytes(sums)
+    (tmp_path / "SHA256SUMS.txt.sig").write_text(sign(sums) + "\n")
+    # The CLI uses the built-in release keys; swap in the test key.
+    real = releases.verify_signature
+    monkeypatch.setattr(
+        releases, "verify_signature", lambda d, s, k=(PUBLIC,): real(d, s, (PUBLIC,))
+    )
+    assert cli.main(["verify-update", str(tmp_path), name]) == 0
+    assert cli.main(["verify-update", str(tmp_path), "../" + name]) == 2
+    assert cli.main(["verify-update", str(tmp_path), "other.deb"]) == 1
+    (tmp_path / name).write_bytes(DEB_PACKAGE + b"x")
+    assert cli.main(["verify-update", str(tmp_path), name]) == 1
+    assert "checksum mismatch" in capsys.readouterr().err
+    monkeypatch.setattr(releases, "verify_signature", real)
+    (tmp_path / name).write_bytes(DEB_PACKAGE)
+    assert cli.main(["verify-update", str(tmp_path), name]) == 1  # not the release key
+
+
+def test_linux_autostart_entry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nestris_terminal.shell import autostart
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert autostart.is_supported() and not autostart.is_enabled()
+    autostart.set_enabled(True, Path("/home/terminal/my config.toml"))
+    entry = (tmp_path / "autostart" / "retroverse-terminal.desktop").read_text()
+    assert "Exec=" in entry and "-m nestris_terminal" in entry
+    assert "my config.toml'" in entry  # quoted (space)
+    assert autostart.is_enabled()
+    autostart.set_enabled(False)
+    assert not autostart.is_enabled()
+
+
+def test_parse_nmcli_wifi() -> None:
+    from nestris_terminal.runtime import parse_nmcli_wifi
+
+    out = "no:Nachbar:40\nyes:Retro\\:verse:72\n"
+    assert parse_nmcli_wifi(out) == {"ssid": "Retro:verse", "signal": "72%", "state": "connected"}
+    assert parse_nmcli_wifi("no:x:10\n") is None

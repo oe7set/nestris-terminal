@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+# Only on removal: an upgrade runs inside nestris-terminal-update.service,
+# started by this very path unit.
+if [ "$1" = "remove" ] && [ -d /run/systemd/system ]; then
+    deb-systemd-invoke stop nestris-terminal-update.path >/dev/null || true
+fi
+
+exit 0

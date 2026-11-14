@@ -18,6 +18,8 @@ It is a client of [NestrisLTM](../nestris-ltm) (host app) and replaces
 
 **[Latest release](https://github.com/oe7set/nestris-terminal/releases/latest)**: run
 `RetroverseTerminal-Setup-<version>.exe` on the touch PC of the player terminal (or unpack the portable zip).
+On a **Debian** touch PC install `nestris-terminal_<version>_amd64.deb` instead:
+[docs/DEBIAN.md](docs/DEBIAN.md).
 Every release is signed (`SHA256SUMS.txt` + `.sig`, see
 `nestris-ltm/docs/UPDATES.md`). Beta versions are listed under
 [all releases](https://github.com/oe7set/nestris-terminal/releases).
@@ -32,8 +34,9 @@ Every release is signed (`SHA256SUMS.txt` + `.sig`, see
    the reader port and **change the PIN**.
 
 Full guide (Windows kiosk settings, troubleshooting, files):
-[docs/OPERATIONS.md](docs/OPERATIONS.md). Build the installer with
-`packaging\build.ps1`.
+[docs/OPERATIONS.md](docs/OPERATIONS.md); Debian with XFCE autologin:
+[docs/DEBIAN.md](docs/DEBIAN.md). Build the installer with
+`packaging\build.ps1`, the Debian package with `packaging/linux/build-deb.sh`.
 
 ## Development
 

@@ -2,9 +2,11 @@
 
 - frameless full screen (``--windowed`` for development), no context menu,
   no pinch zoom, no overscroll navigation, optional hidden cursor;
-- keeps the display awake (Windows ``SetThreadExecutionState``);
+- keeps the display awake (Windows ``SetThreadExecutionState``; on Linux a
+  best-effort screensaver inhibit over D-Bus);
 - reloads the page if it failed to load (e.g. while the bridge starts);
-- quits when the core stops (the config menu's *App beenden*).
+- quits when the core stops (the config menu's *App beenden*) and starts
+  itself again after a Debian app update.
 """
 
 from __future__ import annotations
@@ -31,6 +33,17 @@ log = structlog.get_logger(__name__)
 CHROMIUM_FLAGS = "--disable-pinch --overscroll-history-navigation=0 --touch-events=enabled"
 
 
+# Linux: (service, path, interface) of the inhibit APIs desktops offer; the
+# inhibit lasts as long as this process holds its session-bus connection.
+_INHIBITORS = (
+    ("org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver", "org.freedesktop.ScreenSaver"),
+    ("org.freedesktop.ScreenSaver", "/ScreenSaver", "org.freedesktop.ScreenSaver"),
+    ("org.freedesktop.PowerManagement", "/org/freedesktop/PowerManagement/Inhibit",
+     "org.freedesktop.PowerManagement.Inhibit"),
+)  # fmt: skip
+_inhibited: list[str] = []
+
+
 def keep_display_awake() -> None:
     if sys.platform == "win32":
         import ctypes
@@ -39,6 +52,30 @@ def keep_display_awake() -> None:
         ctypes.windll.kernel32.SetThreadExecutionState(
             es_continuous | es_system_required | es_display_required
         )
+    elif sys.platform.startswith("linux") and not _inhibited:
+        _inhibit_linux()
+
+
+def _inhibit_linux() -> None:
+    """Best effort: the desktop's own power settings (docs/DEBIAN.md) are the
+    real safeguard; this only helps where a screensaver service runs."""
+    try:
+        from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
+    except ImportError:
+        _inhibited.append("")
+        return
+    bus = QDBusConnection.sessionBus()
+    if bus.isConnected():
+        for service, path, interface in _INHIBITORS:
+            iface = QDBusInterface(service, path, interface, bus)
+            if not iface.isValid():
+                continue
+            reply = iface.call("Inhibit", "Retroverse Terminal", "kiosk display")
+            if reply.type() == QDBusMessage.MessageType.ReplyMessage:
+                _inhibited.append(service)
+                log.info("screensaver inhibited", service=service)
+    if not _inhibited:
+        _inhibited.append("")  # nothing to talk to; do not retry every minute
 
 
 class KioskWindow(QMainWindow):
@@ -150,7 +187,7 @@ def run_kiosk(settings: Settings, *, windowed: bool = False) -> int:
         window.show()
     else:
         window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        # A dedicated kiosk PC: stay above anything Windows opens (updates,
+        # A dedicated kiosk PC: stay above anything the OS opens (updates,
         # notifications) and take the focus even when started in the background.
         window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         window.showFullScreen()
@@ -159,6 +196,10 @@ def run_kiosk(settings: Settings, *, windowed: bool = False) -> int:
     code = app.exec()
     core.stop(timeout_s=10.0)
     server.close()
+    if runtime.restart_requested:
+        from nestris_terminal.restart import restart_process
+
+        restart_process()
     return code
 
 

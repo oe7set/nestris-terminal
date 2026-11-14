@@ -1,0 +1,70 @@
+# The Debian package: built in Debian 12 (bookworm), then installed and
+# exercised in a clean Debian 13 (trixie) by packaging/linux/test-package.sh.
+# Called by ci.yml and release.yml; the artifact "debian" holds the .deb.
+#
+# Built inside Debian 12 because a binary built on the Ubuntu runner would
+# need a newer glibc than Debian 12 has; Debian 13 runs it too.
+name: Debian package
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit, branch or tag to build (default: the triggering ref)"
+        type: string
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+    steps:
+      - name: Build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git binutils xz-utils
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Qt runtime libraries (PyInstaller imports PySide6 during the build)
+        run: apt-get install -y --no-install-recommends $(cat packaging/linux/debian/build-libs.txt)
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.NESTRIS_LTM_REPO || format('{0}/nestris-ltm', github.repository_owner) }}
+          ref: ${{ vars.NESTRIS_LTM_REF || 'main' }}
+          token: ${{ secrets.NESTRIS_LTM_TOKEN || github.token }}
+          path: _nestris-ltm
+      - name: Place NestrisLTM next to this repository
+        run: mv _nestris-ltm ../nestris-ltm
+      - uses: astral-sh/setup-uv@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the shared NES package
+        working-directory: ../nestris-ltm/frontend
+        run: pnpm install --frozen-lockfile
+      - name: Build the package
+        run: bash packaging/linux/build-deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian
+          path: dist/*.deb
+          if-no-files-found: error
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: debian
+          path: dist
+      - name: Install and exercise the package
+        run: bash packaging/linux/test-package.sh dist/*.deb

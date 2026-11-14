@@ -21,6 +21,7 @@
     check_error: string | null;
     source: string;
     can_install: boolean;
+    install_hint?: string | null;
     port?: string | null;
     fake?: boolean;
     old_protocol?: boolean;
@@ -198,6 +199,7 @@
         {#if target === "app"}
           {#if !s.can_install}
             <p class="muted small">{t("upd.app_dev")}</p>
+            {#if s.install_hint}<p class="muted small mono">{s.install_hint}</p>{/if}
           {:else if s.update_available && s.latest}
             <p class="muted small">{t("upd.app_restart")}</p>
           {/if}

@@ -3,6 +3,17 @@
 The section of a version is the text of its GitHub release and what the
 built-in updater shows before installing (`.github/scripts/release_notes.py`).
 
+## 0.3.0b1
+
+- **Debian**: the terminal also ships as `nestris-terminal_<v>_amd64.deb` for
+  Debian 12/13 touch PCs with XFCE (set-up guide `docs/DEBIAN.md`).
+  `nestris-terminal autostart on` writes an XDG autostart entry. Updates
+  from the hidden menu install the package through a root helper, and the
+  kiosk restarts by itself. Reader firmware is flashed with the bundled
+  esptool, as on Windows.
+- The Updates tab says why an installation cannot update itself.
+- New command `nestris-terminal verify-update`.
+
 ## 0.2.0
 
 First stable release of the Retroverse Terminal, the touch kiosk next to the
