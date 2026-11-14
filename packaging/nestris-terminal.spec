@@ -56,6 +56,10 @@ def keep(entry):
         name = name[3:]
     if "PySide6/qml/" in dest:
         return False
+    # Linux: the GTK3 platform theme would pull in all of GTK; Qt falls back
+    # to its own style without it.
+    if "platformthemes/libqgtk3" in dest:
+        return False
     if name.startswith(DROP):
         return False
     if "qtwebengine_locales/" in dest and not name.endswith(KEEP_LOCALES):
@@ -79,8 +83,33 @@ e = Analysis(
     noarchive=False,
 )
 
+a_binaries_all = list(a.binaries)
 a.binaries = [e for e in a.binaries if keep(e)]
 a.datas = [e for e in a.datas if keep(e)]
+
+
+def drop_dependents(binaries):
+    """Linux: also drop every bundled library or plugin (e.g. PySide6/Qt3DCore.abi3.so,
+    a QML or multimedia plugin) that links a library dropped above; it could
+    never load. Windows keeps such files too, but nothing checks them there."""
+    import subprocess
+
+    kept = {e[0].replace("\\", "/").rsplit("/", 1)[-1] for e in binaries}
+    dropped = {e[0].replace("\\", "/").rsplit("/", 1)[-1] for e in a_binaries_all} - kept
+    needs = {}
+    for dest, src, _kind in binaries:
+        out = subprocess.run(["objdump", "-p", src], capture_output=True, text=True).stdout
+        needs[dest] = {ln.split()[1] for ln in out.splitlines() if ln.strip().startswith("NEEDED")}
+    while True:
+        gone = {e[0] for e in binaries if needs.get(e[0], set()) & dropped}
+        if not gone:
+            return binaries
+        dropped |= {d.replace("\\", "/").rsplit("/", 1)[-1] for d in gone}
+        binaries = [e for e in binaries if e[0] not in gone]
+
+
+if sys.platform.startswith("linux"):
+    a.binaries = drop_dependents(a.binaries)
 pyz = PYZ(a.pure)
 
 # The .ico is a Windows resource; Linux uses the PNG from the .desktop file.

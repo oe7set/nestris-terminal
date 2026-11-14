@@ -3,3 +3,4 @@ libxkbcommon0 libxkbcommon-x11-0 libx11-xcb1 libxcb-cursor0 libxcb-icccm4 libxcb
 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
 libxcb-xinput0 libxcb-xkb1 libnss3 libnspr4 libxcomposite1 libxdamage1 libxrandr2
 libxtst6 libxshmfence1 libxkbfile1 libgbm1 libdrm2 libasound2 libcups2
+libwayland-client0 libwayland-cursor0 libwayland-egl1
