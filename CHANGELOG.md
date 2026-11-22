@@ -3,6 +3,30 @@
 The section of a version is the text of its GitHub release and what the
 built-in updater shows before installing (`.github/scripts/release_notes.py`).
 
+## 0.3.0
+
+Runs on Debian touch PCs, fits screens turned to portrait, and the crew can
+clear cards and give a player a new card. Works with NestrisLTM 0.5.1 and
+reader firmware 1.1.0.
+
+- **Debian**: `nestris-terminal_<v>_amd64.deb` for Debian 12/13 touch PCs
+  with XFCE (guide `docs/DEBIAN.md`), autostart in the XFCE session, app
+  updates from the hidden menu through a root helper, reader firmware
+  flashed with the bundled esptool.
+- **Portrait screens** (e.g. 768×1366): every screen rearranges instead of
+  running off the right edge; the replay gets a larger playfield. Landscape
+  is unchanged.
+- **Hidden menu → Karten**:
+  - **Löschmodus**: every card placed is unlinked from its player in
+    NestrisLTM and wiped, so it is like new (the player keeps the games).
+    NestrisLTM is asked first: if it is unreachable, the card stays
+    untouched.
+  - **Neue Karte für einen Spieler**: search by nickname or name, place a
+    card; the nickname is written onto it and the card is linked to the
+    player. Old cards of the player keep working.
+- The Updates tab says why an installation cannot update itself; new command
+  `nestris-terminal verify-update`.
+
 ## 0.3.0b4
 
 - Clear mode asks NestrisLTM first and only then wipes the card: with an
