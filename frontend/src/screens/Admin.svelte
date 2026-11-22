@@ -533,4 +533,22 @@
   .l.critical {
     color: var(--bad);
   }
+  /* Portrait: tabs and buttons wrap, debug panels stack */
+  @media (orientation: portrait) {
+    .top {
+      flex-wrap: wrap;
+      row-gap: 10px;
+    }
+    .tabs {
+      flex-wrap: wrap;
+      flex-basis: 100%;
+    }
+    .tabs button {
+      flex: 1;
+      padding: 0 12px;
+    }
+    .debug {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
 </style>

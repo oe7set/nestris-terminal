@@ -79,6 +79,7 @@
     height: 100%;
     display: grid;
     grid-template-rows: auto 1fr auto;
+    grid-template-columns: minmax(0, 1fr);
   }
   main {
     min-height: 0;
@@ -113,6 +114,12 @@
   @keyframes spin {
     to {
       transform: rotate(360deg);
+    }
+  }
+  /* Portrait screen (e.g. 768x1366): narrower margins */
+  @media (orientation: portrait) {
+    main {
+      padding: 14px 16px 18px;
     }
   }
 </style>

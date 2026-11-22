@@ -211,4 +211,15 @@
     justify-items: center;
     padding: 36px 48px;
   }
+  @media (orientation: portrait) {
+    .cols {
+      gap: 24px;
+    }
+    .big {
+      font-size: 44px;
+    }
+    .chips button {
+      width: 64px;
+    }
+  }
 </style>

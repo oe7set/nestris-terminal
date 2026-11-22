@@ -17,6 +17,15 @@
   let error = $state(false);
   let raf = 0;
 
+  // A portrait screen has room for a bigger playfield.
+  const portraitQuery = window.matchMedia("(orientation: portrait)");
+  let portrait = $state(portraitQuery.matches);
+  $effect(() => {
+    const update = () => (portrait = portraitQuery.matches);
+    portraitQuery.addEventListener("change", update);
+    return () => portraitQuery.removeEventListener("change", update);
+  });
+
   function loop(now: number): void {
     if (timeline) {
       frame = timeline.frames[timeline.tick(now)] ?? null;
@@ -68,7 +77,7 @@
 {:else if timeline && frame}
   <div class="replay">
     <button class="well" onclick={toggle} aria-label="Play/Pause">
-      <Playfield rows={rowsFromCells(frame.cells)} level={frame.level} cell={30} />
+      <Playfield rows={rowsFromCells(frame.cells)} level={frame.level} cell={portrait ? 36 : 30} />
       {#if !playing}<span class="paused">▶</span>{/if}
     </button>
     <div class="side">
@@ -199,5 +208,21 @@
   .center {
     text-align: center;
     margin-top: 80px;
+  }
+  /* Portrait: playfield on top, values and controls below */
+  @media (orientation: portrait) {
+    .replay {
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+    }
+    .side {
+      width: min(100%, 620px);
+      grid-template-columns: auto 1fr;
+      align-items: start;
+    }
+    .controls {
+      grid-column: 1 / -1;
+    }
   }
 </style>

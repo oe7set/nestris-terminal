@@ -466,4 +466,26 @@
       transform: scale(0.3);
     }
   }
+  /* Portrait: steps get their own line below the title */
+  @media (orientation: portrait) {
+    .top {
+      flex-wrap: wrap;
+      row-gap: 12px;
+      gap: 16px;
+    }
+    .top h1 {
+      font-size: 38px;
+    }
+    .steps {
+      order: 3;
+      flex-basis: 100%;
+      font-size: 18px;
+    }
+    .stage h2 {
+      font-size: 32px;
+    }
+    .welcome {
+      font-size: 46px;
+    }
+  }
 </style>

@@ -34,4 +34,15 @@
     flex: 1;
     min-height: 0;
   }
+  @media (orientation: portrait) {
+    .replay {
+      gap: 14px;
+    }
+    .top {
+      gap: 14px;
+    }
+    .top h2 {
+      font-size: 24px;
+    }
+  }
 </style>

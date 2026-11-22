@@ -3,6 +3,16 @@
 The section of a version is the text of its GitHub release and what the
 built-in updater shows before installing (`.github/scripts/release_notes.py`).
 
+## 0.3.0b2
+
+- **Portrait screens**: the UI also fits a screen turned by 90° (e.g.
+  768×1366). The menu puts the highscore above the card prompt, the player
+  page its statistics above the games list, the replay its controls below
+  the (larger) playfield; the registration, score entry and the hidden menu
+  wrap instead of running off the right edge. Landscape is unchanged.
+- The status bar shortens a long event name instead of pushing the clock off
+  the screen.
+
 ## 0.3.0b1
 
 - **Debian**: the terminal also ships as `nestris-terminal_<v>_amd64.deb` for

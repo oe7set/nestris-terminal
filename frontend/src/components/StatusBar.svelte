@@ -82,4 +82,31 @@
     font-size: 26px;
     color: var(--muted);
   }
+  .event {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  @media (orientation: portrait) {
+    header {
+      gap: 12px;
+      height: 64px;
+      padding: 0 16px;
+    }
+    .logo {
+      font-size: 28px;
+    }
+    .event {
+      font-size: 18px;
+    }
+    .warn-pill {
+      padding: 4px 10px;
+      font-size: 15px;
+      white-space: nowrap;
+    }
+    .clock {
+      font-size: 22px;
+    }
+  }
 </style>

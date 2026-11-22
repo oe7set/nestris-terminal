@@ -238,4 +238,56 @@
       transform: rotate(0);
     }
   }
+  /* Portrait: highscore on top, card prompt and sign-up below */
+  @media (orientation: portrait) {
+    .menu {
+      flex-direction: column;
+      gap: 18px;
+    }
+    .board {
+      min-height: 0;
+      padding: 16px 16px 12px;
+    }
+    .head {
+      flex-wrap: wrap;
+      row-gap: 4px;
+    }
+    .entry {
+      grid-template-columns: 48px minmax(0, 1fr) auto 44px 150px 26px;
+      gap: 10px;
+      padding: 0 12px;
+      min-height: 64px;
+    }
+    .rank {
+      font-size: 26px;
+    }
+    .name {
+      font-size: 24px;
+    }
+    .score {
+      font-size: 26px;
+    }
+    .lv {
+      font-size: 17px;
+    }
+    aside {
+      width: auto;
+      flex: none;
+      gap: 16px;
+    }
+    .cta {
+      flex-direction: row;
+      gap: 20px;
+      padding: 14px 24px;
+    }
+    .card-anim {
+      zoom: 0.62;
+      flex: none;
+    }
+    .place {
+      font-size: 28px;
+      max-width: none;
+      text-align: left;
+    }
+  }
 </style>

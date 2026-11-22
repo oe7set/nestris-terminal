@@ -302,4 +302,63 @@
     text-align: center;
     font-size: 18px;
   }
+  /* Portrait: stats on top, games/events list below */
+  @media (orientation: portrait) {
+    .player {
+      gap: 14px;
+    }
+    .top {
+      flex-wrap: wrap;
+      row-gap: 10px;
+    }
+    .top h1 {
+      font-size: 36px;
+      flex: 1 1 100%;
+    }
+    .top .spacer {
+      display: none;
+    }
+    .cols {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 14px;
+    }
+    .left {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 14px;
+    }
+    .left .panel {
+      padding: 16px 18px;
+    }
+    .standing {
+      gap: 18px;
+    }
+    .rankbox {
+      padding: 8px 16px;
+    }
+    .rank {
+      font-size: 64px;
+    }
+    .facts {
+      font-size: 28px;
+    }
+    .gap {
+      font-size: 19px;
+    }
+    .tiles {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px 14px;
+      font-size: 24px;
+    }
+    .game {
+      grid-template-columns: 150px 120px minmax(0, 1fr) auto 26px;
+      gap: 10px;
+      padding: 0 12px;
+      font-size: 18px;
+    }
+    .gscore {
+      font-size: 24px;
+    }
+  }
 </style>
