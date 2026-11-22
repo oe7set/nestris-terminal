@@ -195,6 +195,13 @@ async def test_admin_cards(setup: tuple[Runtime, httpx.AsyncClient, StubHost]) -
     stub.old_host = True
     r = await client.get("/local/admin/players", params={"q": "er"}, headers=h)
     assert r.status_code == 409 and r.json()["detail"] == "host_old"
+    # An old host: the card is not touched (the host is asked first).
+    driver.can_erase = True
+    sent = len(driver.sent)
+    r = await client.post("/local/admin/cards/clear", json={"uid": "04CC0003"}, headers=h)
+    assert r.status_code == 409 and r.json()["detail"] == "host_old"
+    assert not any("erase" in line for line in driver.sent[sent:])
+    assert runtime.cards.card is not None and runtime.cards.card.format == "legacy"
 
 
 async def test_profile_greets_on_the_reader(

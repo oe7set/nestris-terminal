@@ -3,6 +3,11 @@
 The section of a version is the text of its GitHub release and what the
 built-in updater shows before installing (`.github/scripts/release_notes.py`).
 
+## 0.3.0b4
+
+- Clear mode asks NestrisLTM first and only then wipes the card: with an
+  unreachable or too old NestrisLTM the card is left untouched.
+
 ## 0.3.0b3
 
 - **Hidden menu → Karten**, for the crew:

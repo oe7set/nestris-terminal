@@ -395,13 +395,17 @@ async def admin_players(request: Request, _: AdminDep, q: str = "") -> Any:
 
 @local.post("/admin/cards/clear")
 async def clear_card(body: ClearIn, request: Request, _: AdminDep) -> dict[str, Any]:
-    """Clear mode: make the card on the reader blank and forget it on the host,
-    so it counts as a new card. A card that is already blank is only
-    forgotten (retry after the host was unreachable)."""
+    """Clear mode: forget the card on the host, then make it blank on the
+    reader, so it counts as a new card. The host goes first: if it is
+    unreachable or too old, the card stays untouched. If the erase fails
+    afterwards, the name still on the card links it to the same player again
+    (``name_match``); clearing it once more finishes the job. A card that is
+    already blank is only forgotten."""
     runtime = rt(request)
     uid = body.uid.upper()
     current = runtime.cards.card
     before = current if current is not None and current.uid == uid else None
+    host = await _host_new(runtime.host.unlink_card(uid))
     erased = False
     if before is None or before.format != "blank":
         try:
@@ -409,7 +413,6 @@ async def clear_card(body: ClearIn, request: Request, _: AdminDep) -> dict[str, 
         except CardWriteError as exc:
             raise _write_error(exc) from exc
         erased = True
-    host = await _host_new(runtime.host.unlink_card(uid))
     log.info("card cleared", uid=uid, erased=erased, player=(host.get("player") or {}).get("id"))
     return {
         "ok": True,
