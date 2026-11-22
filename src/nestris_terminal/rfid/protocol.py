@@ -169,6 +169,14 @@ def write(id: int, name: str, *, uid: str | None = None, timeout_ms: int = 15000
     return _dump(data)
 
 
+def erase(id: int, *, uid: str | None = None, timeout_ms: int = 15000) -> str:
+    """Make a card blank again (firmware 1.1.0+; older answers ``unknown_type``)."""
+    data: dict[str, Any] = {"type": "erase", "id": id, "timeout_ms": timeout_ms}
+    if uid:
+        data["uid"] = uid
+    return _dump(data)
+
+
 def show(id: int, lines: list[str], *, uid: str | None = None, ttl_ms: int = 0) -> str:
     data: dict[str, Any] = {"type": "show", "id": id, "lines": [s[:21] for s in lines[:4]]}
     if uid:

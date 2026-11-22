@@ -20,6 +20,7 @@ from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
+import structlog
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,6 +40,8 @@ if TYPE_CHECKING:
 
 ADMIN_TTL_S = 15 * 60
 _admin_tokens: dict[str, float] = {}
+
+log = structlog.get_logger(__name__)
 
 
 def web_dir() -> Path:
@@ -78,6 +81,15 @@ class WriteIn(BaseModel):
     name: str = Field(min_length=1, max_length=protocol.MAX_NAME)
     # Only write this card (the one the player just registered with).
     uid: str | None = Field(default=None, pattern=r"^[0-9A-Fa-f]{8}([0-9A-Fa-f]{6}){0,2}$")
+
+
+class ClearIn(BaseModel):
+    uid: str = Field(pattern=r"^[0-9A-Fa-f]{8}([0-9A-Fa-f]{6}){0,2}$")
+
+
+class IssueIn(BaseModel):
+    player_id: int
+    nickname: str = Field(min_length=1, max_length=64)
 
 
 class PinIn(BaseModel):
@@ -134,6 +146,24 @@ async def _host(call: Any) -> Any:
     except HostError as exc:
         status = exc.status if exc.status >= 400 else 503
         raise HTTPException(status, exc.detail) from exc
+
+
+async def _host_new(call: Any) -> Any:
+    """Like ``_host`` for routes that need NestrisLTM 0.5.1: an older host
+    answers 405 (the path exists with another method), reported as ``host_old``."""
+    try:
+        return await call
+    except HostError as exc:
+        if exc.status in (404, 405):
+            raise HTTPException(409, "host_old") from exc
+        status = exc.status if exc.status >= 400 else 503
+        raise HTTPException(status, exc.detail) from exc
+
+
+def _write_error(exc: CardWriteError) -> HTTPException:
+    if exc.code == "unknown_type":
+        return HTTPException(409, "reader_fw_old")
+    return HTTPException(409, str(exc))
 
 
 def require_admin(x_admin_token: Annotated[str | None, Header()] = None) -> None:
@@ -350,6 +380,63 @@ async def logs(_: AdminDep, after_id: int = 0) -> dict[str, Any]:
             for e in entries[-300:]
         ]
     }
+
+
+# ---------------------------------------------------------------- admin: cards
+
+CLEAR_TIMEOUT_S = 5.0
+
+
+@local.get("/admin/players")
+async def admin_players(request: Request, _: AdminDep, q: str = "") -> Any:
+    """Player search for "new card for a player"."""
+    return await _host_new(rt(request).host.search_players(q))
+
+
+@local.post("/admin/cards/clear")
+async def clear_card(body: ClearIn, request: Request, _: AdminDep) -> dict[str, Any]:
+    """Clear mode: make the card on the reader blank and forget it on the host,
+    so it counts as a new card. A card that is already blank is only
+    forgotten (retry after the host was unreachable)."""
+    runtime = rt(request)
+    uid = body.uid.upper()
+    current = runtime.cards.card
+    before = current if current is not None and current.uid == uid else None
+    erased = False
+    if before is None or before.format != "blank":
+        try:
+            await runtime.cards.erase(CLEAR_TIMEOUT_S, uid=uid)
+        except CardWriteError as exc:
+            raise _write_error(exc) from exc
+        erased = True
+    host = await _host_new(runtime.host.unlink_card(uid))
+    log.info("card cleared", uid=uid, erased=erased, player=(host.get("player") or {}).get("id"))
+    return {
+        "ok": True,
+        "uid": uid,
+        "name": before.name if before else None,
+        "erased": erased,
+        "player": host.get("player"),
+    }
+
+
+@local.post("/admin/cards/issue")
+async def issue_card(body: IssueIn, request: Request, _: AdminDep) -> dict[str, Any]:
+    """New card for an existing player: write the nickname onto the next card
+    placed on the reader and link its uid to the player (a card of someone
+    else moves to this player; the old cards of the player keep working)."""
+    runtime = rt(request)
+    try:
+        card = await runtime.cards.write_name(body.nickname, runtime.settings.rfid.write_timeout_s)
+    except CardWriteError as exc:
+        raise _write_error(exc) from exc
+    previous = await _host(runtime.host.card(card.uid, None))
+    linked = await _host(runtime.host.link_card(card.uid, body.player_id))
+    before = previous.get("player") if previous.get("status") == "known" else None
+    if before and before.get("id") == body.player_id:
+        before = None
+    log.info("card issued", uid=card.uid, player=body.player_id, previous=before)
+    return {"ok": True, "card": card.as_dict(), "player": linked.get("player"), "previous": before}
 
 
 @local.post("/admin/fake-card")

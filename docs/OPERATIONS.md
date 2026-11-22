@@ -98,6 +98,7 @@ the PC behave like an appliance:
 |---|---|
 | Einstellungen | NestrisLTM address and token, reader port or simulated reader, language, full screen, cursor, idle timeout (back to the menu), card grace period, new PIN. *Speichern* applies immediately, no restart. |
 | Leser | Reader firmware, serial number, port, RC522 chip and display; settings stored in the reader itself (display 128×32 / 128×64 / none, rotate 180°, brightness). |
+| Karten | **Löschmodus**: every card placed on the reader is wiped (blank, like new) and unlinked from its player in NestrisLTM; the player keeps the games. A card that stays on the reader is cleared once. **Neue Karte für einen Spieler**: search the player (nickname or name), pick, place a card: the nickname is written and the card is linked to the player (a card of someone else moves over; old cards of the player keep working). Needs reader firmware 1.1.0 and NestrisLTM 0.5.1. |
 | Updates | Terminal app and reader firmware from GitHub releases, see *Updates* below. |
 | Debug | Version, uptime, reader (port, lines received, current and last card), host status and event, token present, IP addresses and Wi-Fi of this PC, live log, *Verbindung testen*, simulated test card (with the simulated reader). |
 

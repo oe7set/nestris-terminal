@@ -9,7 +9,7 @@ current state and turns it into events for the UI:
 
 It also keeps the link alive (``ping`` every 3 s, ``hello`` after a
 reconnect), refuses readers with another protocol version, and correlates
-commands (``write``, ``show``, ``config``) with their ``result`` by id.
+commands (``write``, ``erase``, ``show``, ``config``) with their ``result`` by id.
 """
 
 from __future__ import annotations
@@ -244,16 +244,31 @@ class CardTracker:
         With ``uid`` only that card is written. The reader verifies the write
         by reading it back.
         """
+        name = name[: protocol.MAX_NAME]
+        result = await self._write(
+            lambda cid, ms: protocol.write(cid, name, uid=uid, timeout_ms=ms), timeout_s
+        )
+        card = Card(result.uid or (uid or ""), result.name or name, "retroverse")
+        return self.card if self.card is not None and self.card.uid == card.uid else card
+
+    async def erase(self, timeout_s: float, *, uid: str | None = None) -> Card:
+        """Make the card on (or next placed on) the reader blank, like a new one.
+
+        Needs reader firmware 1.1.0; older firmware fails with ``unknown_type``.
+        """
+        result = await self._write(
+            lambda cid, ms: protocol.erase(cid, uid=uid, timeout_ms=ms), timeout_s
+        )
+        return Card(result.uid or (uid or ""), None, "blank")
+
+    async def _write(self, build: Callable[[int, int], str], timeout_s: float) -> protocol.Result:
         if self._writing:
             raise CardWriteError("busy", "another write is in progress")
         timeout_ms = int(min(max(timeout_s, 1.0), 60.0) * 1000)
         self._writing = True
         try:
             result = await self._command(
-                lambda cid: protocol.write(
-                    cid, name[: protocol.MAX_NAME], uid=uid, timeout_ms=timeout_ms
-                ),
-                timeout_ms / 1000 + WRITE_GRACE_S,
+                lambda cid: build(cid, timeout_ms), timeout_ms / 1000 + WRITE_GRACE_S
             )
         except ReaderCommandError as exc:
             raise CardWriteError("reader", str(exc)) from exc
@@ -261,8 +276,7 @@ class CardTracker:
             self._writing = False
         if not result.ok:
             raise CardWriteError(result.error or "failed", result.detail or "")
-        card = Card(result.uid or (uid or ""), result.name or name, "retroverse")
-        return self.card if self.card is not None and self.card.uid == card.uid else card
+        return result
 
     async def show(self, lines: list[str], *, uid: str | None = None, ttl_ms: int = 0) -> bool:
         """Text on the reader's display while the card lies on it."""

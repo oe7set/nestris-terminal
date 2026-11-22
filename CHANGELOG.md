@@ -3,6 +3,18 @@
 The section of a version is the text of its GitHub release and what the
 built-in updater shows before installing (`.github/scripts/release_notes.py`).
 
+## 0.3.0b3
+
+- **Hidden menu → Karten**, for the crew:
+  - **Löschmodus** (clear mode): every card placed on the reader is wiped and
+    unlinked from its player in NestrisLTM, so it is like new (the player
+    keeps the games). The list shows each card and whom it belonged to.
+  - **Neue Karte für einen Spieler**: search a player by nickname or name,
+    place a card; the nickname is written onto it and the card is linked to
+    the player (e.g. for a lost card). Old cards of the player keep working.
+- Needs reader firmware **1.1.0** (new `erase` command) and **NestrisLTM
+  0.5.1**; with older versions the tab says which one to update.
+
 ## 0.3.0b2
 
 - **Portrait screens**: the UI also fits a screen turned by 90° (e.g.

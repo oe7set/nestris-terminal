@@ -24,6 +24,8 @@ class StubHost:
         self.requests: list[tuple[str, str, Any]] = []
         self.token_ok = True
         self.reader_fw: str | None = None
+        self.cards: dict[str, dict[str, Any]] = {}  # uid -> player
+        self.old_host = False  # NestrisLTM before 0.5.1: no search, no DELETE /card
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content) if request.content else None
@@ -37,6 +39,26 @@ class StubHost:
         if path == "/ping":
             return httpx.Response(
                 200, json={"ok": True, "version": "x", "event": {"id": 1, "name": "2026"}}
+            )
+        if self.old_host and (
+            request.method == "DELETE" or (path == "/players" and request.method == "GET")
+        ):
+            return httpx.Response(405, json={"detail": "Method Not Allowed"})
+        if path.startswith("/card/") and path.endswith("/link"):
+            uid = path.split("/")[2]
+            self.cards[uid] = {"id": body["player_id"], "nickname": "Erv"}
+            return httpx.Response(200, json={"ok": True, "player": self.cards[uid]})
+        if path.startswith("/card/") and request.method == "DELETE":
+            player = self.cards.pop(path.split("/")[2], None)
+            return httpx.Response(200, json={"ok": True, "player": player})
+        if path == "/players" and request.method == "GET":
+            q = request.url.params.get("q", "")
+            players = [{"id": 7, "nickname": "Erv", "cards": 1}] if q.lower() in "erv" else []
+            return httpx.Response(200, json={"players": players})
+        if path.startswith("/card/") and path.split("/")[2] in self.cards:
+            uid = path.split("/")[2]
+            return httpx.Response(
+                200, json={"status": "known", "uid": uid, "player": self.cards[uid]}
             )
         if path.startswith("/card/"):
             return httpx.Response(
@@ -122,6 +144,57 @@ async def test_card_write(setup: tuple[Runtime, httpx.AsyncClient, StubHost]) ->
     assert r.status_code == 409 and r.json()["detail"].startswith("write")
     r = await client.post("/local/card/write", json={"name": "Erv", "uid": "nothex!"})
     assert r.status_code == 422
+
+
+async def test_admin_cards(setup: tuple[Runtime, httpx.AsyncClient, StubHost]) -> None:
+    """Clear mode and a new card for a player (hidden menu, tab "Karten")."""
+    runtime, client, stub = setup
+    await until(lambda: runtime.cards.ready)
+    driver = runtime.cards.driver
+    assert isinstance(driver, FakeDriver)
+    assert (await client.get("/local/admin/players", params={"q": "erv"})).status_code == 401
+    token = (await client.post("/local/admin/unlock", json={"pin": "2580"})).json()["token"]
+    h = {"x-admin-token": token}
+
+    r = await client.get("/local/admin/players", params={"q": "er"}, headers=h)
+    assert r.json()["players"] == [{"id": 7, "nickname": "Erv", "cards": 1}]
+
+    # New card for Erv: written with the nickname, linked on the host.
+    stub.cards["04BB0002"] = {"id": 9, "nickname": "Max"}
+    driver.place("04BB0002", "Max", "retroverse")
+    r = await client.post(
+        "/local/admin/cards/issue", json={"player_id": 7, "nickname": "Erv"}, headers=h
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["card"] == {"uid": "04BB0002", "name": "Erv", "format": "retroverse"}
+    assert r.json()["player"]["id"] == 7
+    assert r.json()["previous"] == {"id": 9, "nickname": "Max"}  # the card was Max's
+    assert ("POST", "/api/terminal/v1/card/04BB0002/link", {"player_id": 7}) in stub.requests
+
+    # Clear mode: the card becomes blank and is forgotten on the host.
+    r = await client.post("/local/admin/cards/clear", json={"uid": "04bb0002"}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "ok": True, "uid": "04BB0002", "name": "Erv", "erased": True,
+        "player": {"id": 7, "nickname": "Erv"},
+    }  # fmt: skip
+    assert '"type": "erase"' in driver.sent[-1] or '"type":"erase"' in driver.sent[-1]
+    await until(lambda: runtime.cards.card and runtime.cards.card.format == "blank")
+    assert "04BB0002" not in stub.cards
+    # Already blank: only forgotten on the host, no second write.
+    sent = len(driver.sent)
+    r = await client.post("/local/admin/cards/clear", json={"uid": "04BB0002"}, headers=h)
+    assert r.json()["erased"] is False and r.json()["player"] is None
+    assert not any("erase" in line for line in driver.sent[sent:])
+
+    # Reader firmware 1.0.0 knows no erase; NestrisLTM before 0.5.1 no search.
+    driver.can_erase = False
+    driver.place("04CC0003", "Old", "legacy")
+    r = await client.post("/local/admin/cards/clear", json={"uid": "04CC0003"}, headers=h)
+    assert r.status_code == 409 and r.json()["detail"] == "reader_fw_old"
+    stub.old_host = True
+    r = await client.get("/local/admin/players", params={"q": "er"}, headers=h)
+    assert r.status_code == 409 and r.json()["detail"] == "host_old"
 
 
 async def test_profile_greets_on_the_reader(

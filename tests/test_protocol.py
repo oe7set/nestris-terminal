@@ -75,6 +75,12 @@ def test_commands() -> None:
         "timeout_ms": 9000,
         "uid": "04A1B2C3",
     }
+    assert json.loads(protocol.erase(6, uid="04A1B2C3", timeout_ms=3000)) == {
+        "type": "erase",
+        "id": 6,
+        "timeout_ms": 3000,
+        "uid": "04A1B2C3",
+    }
     show = json.loads(protocol.show(6, ["Erv", "x" * 30, "3", "4", "5"], ttl_ms=100))
     assert show["lines"] == ["Erv", "x" * 21, "3", "4"] and show["ttl_ms"] == 100
     config = json.loads(protocol.config(7, display="128x64"))

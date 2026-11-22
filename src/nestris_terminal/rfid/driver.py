@@ -164,6 +164,7 @@ class FakeDriver:
     interval_s: float = 2.0
     card: protocol.CardData | None = None
     fail_writes: bool = False
+    can_erase: bool = True  # False: behaves like firmware 1.0.0 (no ``erase``)
     fw: str = "0.0.0-fake"
     proto: int = protocol.PROTOCOL
     sent: list[str] = field(default_factory=list)
@@ -222,7 +223,7 @@ class FakeDriver:
                 self._hello(cid)
             elif kind in ("ping", "reboot"):
                 self._result(cid)
-            elif kind == "write":
+            elif kind == "write" or (kind == "erase" and self.can_erase):
                 if self._pending is not None:
                     self._result(cid, False, error="busy")
                 else:
@@ -270,8 +271,11 @@ class FakeDriver:
                 w.get("id"), False, error="write", detail="the card did not accept the write"
             )
             return
-        self.card = protocol.CardData(card.uid, str(w["name"]), "retroverse")
-        self._result(w.get("id"), True, uid=card.uid, name=w["name"])
+        if w.get("type") == "erase":
+            self.card = protocol.CardData(card.uid, None, "blank")
+        else:
+            self.card = protocol.CardData(card.uid, str(w["name"]), "retroverse")
+        self._result(w.get("id"), True, uid=card.uid, name=self.card.name)
         self._out({"type": "card", "state": "present", **self.card.as_dict()})
 
     # ---------------------------------------------------------------- bench controls

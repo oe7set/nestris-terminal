@@ -102,6 +102,16 @@ class HostClient:
         )
         return result
 
+    async def unlink_card(self, uid: str) -> dict[str, Any]:
+        """Forget the card on the host (clear mode); NestrisLTM 0.5.1+."""
+        result: dict[str, Any] = await self._json("DELETE", f"/card/{uid}")
+        return result
+
+    async def search_players(self, query: str) -> dict[str, Any]:
+        """Players by nickname or name (new card for a player); NestrisLTM 0.5.1+."""
+        result: dict[str, Any] = await self._json("GET", "/players", params={"q": query})
+        return result
+
     async def nickname(self, value: str) -> dict[str, Any]:
         result: dict[str, Any] = await self._json("GET", "/nickname", params={"value": value})
         return result
